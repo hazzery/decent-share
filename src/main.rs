@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let opt = Opt::parse();
 
     let (mut network_client, mut network_events, network_event_loop) =
-        network::new(opt.secret_key_seed).await?;
+        network::new(opt.secret_key_seed)?;
 
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());

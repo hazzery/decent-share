@@ -35,7 +35,7 @@ pub(crate) struct FileResponse(Vec<u8>);
 /// - The network event stream, e.g. for incoming requests.
 ///
 /// - The network task driving the network itself.
-pub(crate) async fn new(
+pub(crate) fn new(
     secret_key_seed: Option<u8>,
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), Box<dyn Error>> {
     // Create a public/private key pair, either random or based on a seed.
