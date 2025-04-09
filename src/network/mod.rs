@@ -1,16 +1,21 @@
 mod client;
 mod event_loop;
 
-use std::{error::Error, time::Duration};
+use std::{
+    error::Error,
+    hash::{DefaultHasher, Hash, Hasher},
+    time::Duration,
+};
 
 use futures::{channel::mpsc, prelude::*};
 use libp2p::{
-    identity, kad, noise,
+    gossipsub, identity, kad, mdns, noise,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
     tcp, yamux, StreamProtocol,
 };
 use serde::{Deserialize, Serialize};
+use tokio::io::{Error as TokioError, ErrorKind as TokioErrorKind};
 
 use client::Client;
 pub(crate) use event_loop::Event;
@@ -20,11 +25,14 @@ use event_loop::EventLoop;
 struct Behaviour {
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
+    gossipsub: gossipsub::Behaviour,
+    mdns: mdns::tokio::Behaviour,
 }
 
 // Simple file exchange protocol
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct FileRequest(String);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FileResponse(Vec<u8>);
 
@@ -49,6 +57,19 @@ pub(crate) fn new(
     };
     let peer_id = id_keys.public().to_peer_id();
 
+    // Set a custom gossipsub configuration
+    let gossipsub_config = gossipsub::ConfigBuilder::default()
+        .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
+        .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message
+        // signing)
+        .message_id_fn(|message: &gossipsub::Message| {
+            let mut s = DefaultHasher::new();
+            message.data.hash(&mut s);
+            gossipsub::MessageId::from(s.finish().to_string())
+        }) // content-address messages. No two messages of the same content will be propagated.
+        .build()
+        .map_err(|msg| TokioError::new(TokioErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
+
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_tokio()
         .with_tcp(
@@ -56,18 +77,28 @@ pub(crate) fn new(
             noise::Config::new,
             yamux::Config::default,
         )?
-        .with_behaviour(|key| Behaviour {
-            kademlia: kad::Behaviour::new(
-                peer_id,
-                kad::store::MemoryStore::new(key.public().to_peer_id()),
-            ),
-            request_response: request_response::cbor::Behaviour::new(
-                [(
-                    StreamProtocol::new("/file-exchange/1"),
-                    ProtocolSupport::Full,
-                )],
-                request_response::Config::default(),
-            ),
+        .with_behaviour(|keypair: &identity::Keypair| {
+            Ok(Behaviour {
+                kademlia: kad::Behaviour::new(
+                    peer_id,
+                    kad::store::MemoryStore::new(keypair.public().to_peer_id()),
+                ),
+                request_response: request_response::cbor::Behaviour::new(
+                    [(
+                        StreamProtocol::new("/file-exchange/1"),
+                        ProtocolSupport::Full,
+                    )],
+                    request_response::Config::default(),
+                ),
+                gossipsub: gossipsub::Behaviour::new(
+                    gossipsub::MessageAuthenticity::Signed(keypair.clone()),
+                    gossipsub_config,
+                )?,
+                mdns: mdns::tokio::Behaviour::new(
+                    mdns::Config::default(),
+                    keypair.public().to_peer_id(),
+                )?,
+            })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
