@@ -55,7 +55,7 @@ impl EventLoop {
                 command = self.command_receiver.next() => match command {
                     Some(c) => self.handle_command(c).await,
                     // Command channel closed, thus shutting down the network event loop.
-                    None=>  return,
+                    None => return,
                 },
             }
         }
