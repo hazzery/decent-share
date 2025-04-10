@@ -18,8 +18,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{Error as TokioError, ErrorKind as TokioErrorKind};
 
 use client::Client;
-pub(crate) use event_loop::Event;
-use event_loop::EventLoop;
+pub(crate) use event_loop::{Event, EventLoop};
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
@@ -77,6 +76,7 @@ pub(crate) fn new(
             noise::Config::new,
             yamux::Config::default,
         )?
+        .with_quic()
         .with_behaviour(|keypair: &identity::Keypair| {
             Ok(Behaviour {
                 kademlia: kad::Behaviour::new(
@@ -111,11 +111,18 @@ pub(crate) fn new(
     let (command_sender, command_receiver) = mpsc::channel(0);
     let (event_sender, event_receiver) = mpsc::channel(0);
 
+    let topic = gossipsub::IdentTopic::new("chat-room");
+    swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
+
+    // Listen on all interfaces and whatever port the OS assigns
+    swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
+    swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
+
     Ok((
         Client {
             sender: command_sender,
         },
         event_receiver,
-        EventLoop::new(swarm, command_receiver, event_sender),
+        EventLoop::new(swarm, command_receiver, event_sender, topic),
     ))
 }

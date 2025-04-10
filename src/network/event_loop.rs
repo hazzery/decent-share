@@ -1,3 +1,5 @@
+mod handlers;
+
 use std::{
     collections::{hash_map, HashMap, HashSet},
     error::Error,
@@ -5,12 +7,11 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    prelude::*,
     StreamExt,
 };
 use libp2p::{
     core::Multiaddr,
-    kad,
+    gossipsub, kad, mdns,
     multiaddr::Protocol,
     request_response::{self, OutboundRequestId, ResponseChannel},
     swarm::{Swarm, SwarmEvent},
@@ -29,6 +30,7 @@ pub(crate) struct EventLoop {
     pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
     pending_request_file: HashMap<OutboundRequestId, oneshot::Sender<DynResult<Vec<u8>>>>,
+    gossipsub_topic: gossipsub::IdentTopic,
 }
 
 impl EventLoop {
@@ -36,6 +38,7 @@ impl EventLoop {
         swarm: Swarm<Behaviour>,
         command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
+        gossipsub_topic: gossipsub::IdentTopic,
     ) -> Self {
         Self {
             swarm,
@@ -45,6 +48,7 @@ impl EventLoop {
             pending_start_providing: HashMap::default(),
             pending_get_providers: HashMap::default(),
             pending_request_file: HashMap::default(),
+            gossipsub_topic,
         }
     }
 
@@ -53,7 +57,7 @@ impl EventLoop {
             tokio::select! {
                 event = self.swarm.select_next_some() => self.handle_event(event).await,
                 command = self.command_receiver.next() => match command {
-                    Some(c) => self.handle_command(c).await,
+                    Some(c) => self.handle_command(c),
                     // Command channel closed, thus shutting down the network event loop.
                     None => return,
                 },
@@ -69,13 +73,8 @@ impl EventLoop {
                     result: kad::QueryResult::StartProviding(_),
                     ..
                 },
-            )) => {
-                let sender: oneshot::Sender<()> = self
-                    .pending_start_providing
-                    .remove(&id)
-                    .expect("Completed query to be previously pending.");
-                let _ = sender.send(());
-            }
+            )) => self.handle_pending_start_providing(&id),
+
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
                     id,
@@ -86,103 +85,71 @@ impl EventLoop {
                         })),
                     ..
                 },
-            )) => {
-                if let Some(sender) = self.pending_get_providers.remove(&id) {
-                    sender.send(providers).expect("Receiver not to be dropped");
+            )) => self.handle_found_providers(&id, providers),
 
-                    // Finish the query. We are only interested in the first result.
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .query_mut(&id)
-                        .unwrap()
-                        .finish();
-                }
-            }
-            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
-                kad::Event::OutboundQueryProgressed {
-                    result:
-                        kad::QueryResult::GetProviders(Ok(
-                            kad::GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
-                        )),
-                    ..
-                },
-            )) => {}
-            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(_)) => {}
             SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
                 request_response::Event::Message { message, .. },
-            )) => match message {
-                request_response::Message::Request {
-                    request, channel, ..
-                } => {
-                    self.event_sender
-                        .send(Event::InboundRequest {
-                            request: request.0,
-                            channel,
-                        })
-                        .await
-                        .expect("Event receiver not to be dropped.");
-                }
-                request_response::Message::Response {
-                    request_id,
-                    response,
-                } => {
-                    let _ = self
-                        .pending_request_file
-                        .remove(&request_id)
-                        .expect("Request to still be pending.")
-                        .send(Ok(response.0));
-                }
-            },
+            )) => self.handle_request_response_message(message).await,
+
             SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
                 request_response::Event::OutboundFailure {
                     request_id, error, ..
                 },
-            )) => {
-                let _ = self
-                    .pending_request_file
-                    .remove(&request_id)
-                    .expect("Request to still be pending.")
-                    .send(Err(Box::new(error)));
-            }
-            SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
-                request_response::Event::ResponseSent { .. },
-            )) => {}
-            SwarmEvent::NewListenAddr { address, .. } => {
-                let local_peer_id = *self.swarm.local_peer_id();
-                eprintln!(
-                    "Local node is listening on {:?}",
-                    address.with(Protocol::P2p(local_peer_id))
-                );
-            }
-            SwarmEvent::IncomingConnection { .. } => {}
+            )) => self.handle_request_response_outbound_failure(request_id, error),
+
+            SwarmEvent::NewListenAddr { address, .. } => self.handle_new_listen_address(address),
+
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
-            } => {
-                if endpoint.is_dialer() {
-                    if let Some(sender) = self.pending_dial.remove(&peer_id) {
-                        let _ = sender.send(Ok(()));
-                    }
-                }
-            }
-            SwarmEvent::ConnectionClosed { .. } => {}
+            } => self.handle_connection_established(&peer_id, &endpoint),
+
             SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                if let Some(peer_id) = peer_id {
-                    if let Some(sender) = self.pending_dial.remove(&peer_id) {
-                        let _ = sender.send(Err(Box::new(error)));
-                    }
-                }
+                self.handle_outgoing_connection_error(peer_id, error);
             }
-            SwarmEvent::IncomingConnectionError { .. } => {}
+
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
+                self.handle_mdns_discovered(&list);
+            }
+
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
+                self.handle_mdns_expired(&list);
+            }
+
+            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
+                propagation_source: peer_id,
+                message_id: id,
+                message,
+            })) => self.handle_gossipsub_message(&message, &id, &peer_id),
+
             SwarmEvent::Dialing {
                 peer_id: Some(peer_id),
                 ..
             } => eprintln!("Dialing {peer_id}"),
+
+            SwarmEvent::Behaviour(
+                BehaviourEvent::Kademlia(
+                    kad::Event::OutboundQueryProgressed {
+                        result:
+                            kad::QueryResult::GetProviders(Ok(
+                                kad::GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
+                            )),
+                        ..
+                    }
+                    | _,
+                )
+                | BehaviourEvent::RequestResponse(request_response::Event::ResponseSent { .. })
+                | BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed { .. }),
+            )
+            | SwarmEvent::IncomingConnection { .. }
+            | SwarmEvent::ConnectionClosed { .. }
+            | SwarmEvent::IncomingConnectionError { .. }
+            | SwarmEvent::NewExternalAddrOfPeer { .. } => {}
+
             e => panic!("{e:?}"),
         }
     }
 
-    async fn handle_command(&mut self, command: Command) {
+    fn handle_command(&mut self, command: Command) {
         match command {
             Command::StartListening { addr, sender } => {
                 let _ = match self.swarm.listen_on(addr) {
@@ -281,7 +248,6 @@ pub(super) enum Command {
         channel: ResponseChannel<FileResponse>,
     },
 }
-
 #[derive(Debug)]
 pub(crate) enum Event {
     InboundRequest {
