@@ -73,19 +73,29 @@ impl EventLoop {
                     result: kad::QueryResult::StartProviding(_),
                     ..
                 },
-            )) => self.handle_pending_start_providing(&id),
+            )) => self.handle_pending_start_providing(id),
 
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
                     id,
-                    result:
-                        kad::QueryResult::GetProviders(Ok(kad::GetProvidersOk::FoundProviders {
-                            providers,
-                            ..
-                        })),
+                    result: kad::QueryResult::GetProviders(providers),
                     ..
                 },
-            )) => self.handle_found_providers(&id, providers),
+            )) => self.handle_found_providers(id, providers),
+
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+                kad::Event::OutboundQueryProgressed {
+                    result: kad::QueryResult::GetRecord(record),
+                    ..
+                },
+            )) => self.handle_get_record(record),
+
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
+                kad::Event::OutboundQueryProgressed {
+                    result: kad::QueryResult::PutRecord(record),
+                    ..
+                },
+            )) => self.handle_put_record(record),
 
             SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
                 request_response::Event::Message { message, .. },
@@ -127,16 +137,7 @@ impl EventLoop {
             } => eprintln!("Dialing {peer_id}"),
 
             SwarmEvent::Behaviour(
-                BehaviourEvent::Kademlia(
-                    kad::Event::OutboundQueryProgressed {
-                        result:
-                            kad::QueryResult::GetProviders(Ok(
-                                kad::GetProvidersOk::FinishedWithNoAdditionalRecord { .. },
-                            )),
-                        ..
-                    }
-                    | _,
-                )
+                BehaviourEvent::Kademlia(_)
                 | BehaviourEvent::RequestResponse(request_response::Event::ResponseSent { .. })
                 | BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed { .. }),
             )
@@ -156,6 +157,10 @@ impl EventLoop {
                     Ok(_) => sender.send(Ok(())),
                     Err(e) => sender.send(Err(Box::new(e))),
                 };
+            }
+            Command::RegisterName { name } => {
+                println!("Register {name:?}");
+                todo!("Implement registering of name into DHT");
             }
             Command::Dial {
                 peer_id,
@@ -224,6 +229,9 @@ pub(super) enum Command {
     StartListening {
         addr: Multiaddr,
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+    },
+    RegisterName {
+        name: String,
     },
     Dial {
         peer_id: PeerId,

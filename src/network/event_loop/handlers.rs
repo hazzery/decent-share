@@ -1,5 +1,3 @@
-use std::{collections::HashSet, ops::Mul};
-
 use futures::{channel, SinkExt};
 use libp2p::{core, gossipsub, kad, multiaddr, request_response, swarm, Multiaddr, PeerId};
 
@@ -8,30 +6,69 @@ use super::{Event, EventLoop, FileRequest, FileResponse};
 impl EventLoop {
     pub(in crate::network::event_loop) fn handle_pending_start_providing(
         &mut self,
-        id: &kad::QueryId,
+        id: kad::QueryId,
     ) {
         let sender: channel::oneshot::Sender<()> = self
             .pending_start_providing
-            .remove(id)
+            .remove(&id)
             .expect("Completed query to be previously pending.");
         let _ = sender.send(());
     }
 
     pub(in crate::network::event_loop) fn handle_found_providers(
         &mut self,
-        id: &kad::QueryId,
-        providers: HashSet<PeerId>,
+        id: kad::QueryId,
+        providers: kad::GetProvidersResult,
     ) {
-        if let Some(sender) = self.pending_get_providers.remove(&id) {
-            sender.send(providers).expect("Receiver not to be dropped");
+        match providers {
+            Ok(kad::GetProvidersOk::FoundProviders { providers, .. }) => {
+                if let Some(sender) = self.pending_get_providers.remove(&id) {
+                    sender.send(providers).expect("Receiver not to be dropped");
 
-            // Finish the query. We are only interested in the first result.
-            self.swarm
-                .behaviour_mut()
-                .kademlia
-                .query_mut(&id)
-                .unwrap()
-                .finish();
+                    // Finish the query. We are only interested in the first result.
+                    self.swarm
+                        .behaviour_mut()
+                        .kademlia
+                        .query_mut(&id)
+                        .unwrap()
+                        .finish();
+                }
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("Failed to get providers: {error:?}"),
+        }
+    }
+
+    #[allow(clippy::unused_self)]
+    pub(in crate::network::event_loop) fn handle_get_record(
+        &mut self,
+        record: kad::GetRecordResult,
+    ) {
+        match record {
+            Ok(kad::GetRecordOk::FoundRecord(kad::PeerRecord {
+                record: kad::Record { key, value, .. },
+                ..
+            })) => println!(
+                "Got record {:?} {:?}",
+                std::str::from_utf8(key.as_ref()).unwrap(),
+                std::str::from_utf8(&value).unwrap(),
+            ),
+            Ok(_) => {}
+            Err(error) => eprintln!("Failed to get record: {error:?}"),
+        }
+    }
+
+    #[allow(clippy::unused_self)]
+    pub(in crate::network::event_loop) fn handle_put_record(
+        &mut self,
+        record: kad::PutRecordResult,
+    ) {
+        match record {
+            Ok(kad::PutRecordOk { key }) => println!(
+                "Successfully put record {:?}",
+                std::str::from_utf8(key.as_ref()).unwrap()
+            ),
+            Err(error) => eprintln!("Failed to put record: {error:?}"),
         }
     }
 
@@ -116,7 +153,7 @@ impl EventLoop {
             self.swarm
                 .behaviour_mut()
                 .gossipsub
-                .add_explicit_peer(&peer_id);
+                .add_explicit_peer(peer_id);
         }
     }
 
@@ -129,10 +166,10 @@ impl EventLoop {
             self.swarm
                 .behaviour_mut()
                 .gossipsub
-                .remove_explicit_peer(&peer_id);
+                .remove_explicit_peer(peer_id);
         }
     }
-
+    #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_gossipsub_message(
         &mut self,
         message: &gossipsub::Message,
@@ -142,6 +179,6 @@ impl EventLoop {
         println!(
             "Got message: '{}' with id: {id} from peer: {peer_id}",
             String::from_utf8_lossy(&message.data),
-        )
+        );
     }
 }
