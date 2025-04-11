@@ -2,7 +2,6 @@ mod client;
 mod event_loop;
 
 use std::{
-    error::Error,
     hash::{DefaultHasher, Hash, Hasher},
     time::Duration,
 };
@@ -17,7 +16,7 @@ use libp2p::{
 use serde::{Deserialize, Serialize};
 use tokio::io::{Error as TokioError, ErrorKind as TokioErrorKind};
 
-use client::Client;
+pub(crate) use client::Client;
 pub(crate) use event_loop::{Event, EventLoop};
 
 #[derive(NetworkBehaviour)]
@@ -44,7 +43,7 @@ pub(crate) struct FileResponse(Vec<u8>);
 /// - The network task driving the network itself.
 pub(crate) fn new(
     secret_key_seed: Option<u8>,
-) -> Result<(Client, impl Stream<Item = Event>, EventLoop), Box<dyn Error>> {
+) -> Result<(Client, impl Stream<Item = Event>, EventLoop), anyhow::Error> {
     // Create a public/private key pair, either random or based on a seed.
     let id_keys = match secret_key_seed {
         Some(seed) => {

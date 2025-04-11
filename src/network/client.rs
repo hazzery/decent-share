@@ -102,4 +102,11 @@ impl Client {
             .await
             .expect("Name to register successfully");
     }
+
+    pub(crate) async fn send_message(&mut self, message: String) {
+        self.sender
+            .send(Command::SendMessage { message })
+            .await
+            .expect("Message to send successfully");
+    }
 }

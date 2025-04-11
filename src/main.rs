@@ -18,19 +18,17 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 // DEALINGS IN THE SOFTWARE.
 
+mod action;
 mod network;
 
-use std::{error::Error, io::Write, path::PathBuf};
-
+use action::{handle_get, handle_provide, handle_send};
+use anyhow::anyhow;
 use clap::Parser;
-use futures::{prelude::*, StreamExt};
-use libp2p::{core::Multiaddr, multiaddr::Protocol};
+use tokio::io::AsyncBufReadExt;
 use tracing_subscriber::EnvFilter;
 
-use network::Event;
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), anyhow::Error> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         .try_init();
@@ -43,76 +41,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());
 
-    // In case a listen address was provided use it, otherwise listen on any
-    // address.
-    match opt.listen_address {
-        Some(addr) => network_client
-            .start_listening(addr)
-            .await
-            .expect("Listening not to fail."),
-        None => network_client
-            .start_listening("/ip4/0.0.0.0/tcp/0".parse()?)
-            .await
-            .expect("Listening not to fail."),
-    };
+    network_client.register_name(opt.username).await;
 
-    // In case the user provided an address of a peer on the CLI, dial it.
-    if let Some(addr) = opt.peer {
-        let Some(Protocol::P2p(peer_id)) = addr.iter().last() else {
-            return Err("Expect peer multiaddr to contain peer ID.".into());
+    let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+    loop {
+        print!("Enter command:\n>");
+        let Ok(Some(command)) = stdin.next_line().await else {
+            continue;
         };
-        network_client
-            .dial(peer_id, addr)
-            .await
-            .expect("Dial to succeed");
-    }
 
-    match opt.argument {
-        // Providing a file.
-        CliArgument::Provide { path, name } => {
-            // Advertise oneself as a provider of the file on the DHT.
-            network_client.start_providing(name.clone()).await;
+        let arguments = split_string(&command);
+        let Some(action) = arguments.first() else {
+            return Err(anyhow!("No action specified"));
+        };
 
-            loop {
-                match network_events.next().await {
-                    // Reply with the content of the file on incoming requests.
-                    Some(Event::InboundRequest { request, channel }) => {
-                        if request == name {
-                            network_client
-                                .respond_file(std::fs::read(&path)?, channel)
-                                .await;
-                        }
-                    }
-                    e => todo!("{:?}", e),
-                }
+        match action.as_str() {
+            "Send" => {
+                let Some(message) = arguments.get(1) else {
+                    println!("Missing message content");
+                    continue;
+                };
+                handle_send(message, &mut network_client).await;
             }
-        }
-        // Locating and getting a file.
-        CliArgument::Get { name } => {
-            // Locate all nodes providing the file.
-            let providers = network_client.get_providers(name.clone()).await;
-            if providers.is_empty() {
-                return Err(format!("Could not find provider for file {name}.").into());
+            "Provide" => {
+                let Some(file_path) = arguments.get(1) else {
+                    println!("Missing file path");
+                    continue;
+                };
+                let Some(name) = arguments.get(2) else {
+                    println!("Missing name for file");
+                    continue;
+                };
+                handle_provide(name, file_path, &mut network_client, &mut network_events).await?;
+            }
+            "Get" => {
+                let Some(name) = arguments.get(1) else {
+                    println!("Missing name for file to recieve");
+                    continue;
+                };
+                handle_get(name, &mut network_client).await?;
             }
 
-            // Request the content of the file from each node.
-            let requests = providers.into_iter().map(|p| {
-                let mut network_client = network_client.clone();
-                let name = name.clone();
-                async move { network_client.request_file(p, name).await }.boxed()
-            });
-
-            // Await the requests, ignore the remaining once a single one succeeds.
-            let file_content = futures::future::select_ok(requests)
-                .await
-                .map_err(|_| "None of the providers returned file.")?
-                .0;
-
-            std::io::stdout().write_all(&file_content)?;
-        }
+            action => {
+                println!("Unknown action {action}");
+            }
+        };
     }
-
-    Ok(())
 }
 
 #[derive(Parser, Debug)]
@@ -122,26 +96,13 @@ struct Opt {
     #[arg(long)]
     secret_key_seed: Option<u8>,
 
-    #[arg(long)]
-    peer: Option<Multiaddr>,
-
-    #[arg(long)]
-    listen_address: Option<Multiaddr>,
-
-    #[command(subcommand)]
-    argument: CliArgument,
+    #[arg(long, short)]
+    username: String,
 }
 
-#[derive(Debug, Parser)]
-enum CliArgument {
-    Provide {
-        #[arg(long)]
-        path: PathBuf,
-        #[arg(long)]
-        name: String,
-    },
-    Get {
-        #[arg(long)]
-        name: String,
-    },
+fn split_string(input: &str) -> Vec<String> {
+    let re = regex::Regex::new(r#""([^"]*)"|\S+"#).unwrap();
+    re.captures_iter(input)
+        .map(|cap| cap.get(0).unwrap().as_str().to_string())
+        .collect()
 }

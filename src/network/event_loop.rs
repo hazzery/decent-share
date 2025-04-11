@@ -160,7 +160,18 @@ impl EventLoop {
             }
             Command::RegisterName { name } => {
                 println!("Register {name:?}");
-                todo!("Implement registering of name into DHT");
+                let key = kad::RecordKey::new(&self.swarm.local_peer_id().to_bytes());
+                let record = kad::Record {
+                    key,
+                    value: name.into_bytes(),
+                    publisher: None,
+                    expires: None,
+                };
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .put_record(record, kad::Quorum::One)
+                    .expect("Failed to store record locally");
             }
             Command::Dial {
                 peer_id,
@@ -220,6 +231,13 @@ impl EventLoop {
                     .send_response(channel, FileResponse(file))
                     .expect("Connection to peer to be still open.");
             }
+            Command::SendMessage { message } => {
+                self.swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .publish(self.gossipsub_topic.clone(), message.as_bytes())
+                    .expect("Message Publish error!");
+            }
         }
     }
 }
@@ -254,6 +272,9 @@ pub(super) enum Command {
     RespondFile {
         file: Vec<u8>,
         channel: ResponseChannel<FileResponse>,
+    },
+    SendMessage {
+        message: String,
     },
 }
 #[derive(Debug)]
