@@ -66,7 +66,7 @@ impl EventLoop {
         match record {
             Ok(kad::PutRecordOk { key }) => println!(
                 "Successfully put record {:?}",
-                std::str::from_utf8(key.as_ref()).unwrap()
+                PeerId::from_bytes(key.as_ref()) // std::str::from_utf8(key.as_ref()).unwrap()
             ),
             Err(error) => eprintln!("Failed to put record: {error:?}"),
         }
@@ -146,14 +146,18 @@ impl EventLoop {
 
     pub(in crate::network::event_loop) fn handle_mdns_discovered(
         &mut self,
-        list: &Vec<(PeerId, Multiaddr)>,
+        list: Vec<(PeerId, Multiaddr)>,
     ) {
-        for (peer_id, _multiaddr) in list {
-            println!("mDNS discovered a new peer: {peer_id}");
+        for (peer_id, multiaddr) in list {
             self.swarm
                 .behaviour_mut()
                 .gossipsub
-                .add_explicit_peer(peer_id);
+                .add_explicit_peer(&peer_id);
+
+            self.swarm
+                .behaviour_mut()
+                .kademlia
+                .add_address(&peer_id, multiaddr);
         }
     }
 

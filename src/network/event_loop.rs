@@ -118,7 +118,7 @@ impl EventLoop {
             }
 
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                self.handle_mdns_discovered(&list);
+                self.handle_mdns_discovered(list);
             }
 
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
