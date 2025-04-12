@@ -96,9 +96,9 @@ impl Client {
             .expect("Command receiver not to be dropped.");
     }
 
-    pub(crate) async fn register_name(&mut self, name: String) {
+    pub(crate) async fn register_username(&mut self, username: String) {
         self.sender
-            .send(Command::RegisterName { name })
+            .send(Command::RegisterName { username })
             .await
             .expect("Name to register successfully");
     }

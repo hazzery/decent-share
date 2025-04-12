@@ -41,7 +41,7 @@ async fn main() -> Result<(), anyhow::Error> {
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());
 
-    network_client.register_name(opt.username).await;
+    network_client.register_username(opt.username).await;
 
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     loop {

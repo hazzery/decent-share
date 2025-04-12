@@ -158,11 +158,11 @@ impl EventLoop {
                     Err(e) => sender.send(Err(Box::new(e))),
                 };
             }
-            Command::RegisterName { name } => {
+            Command::RegisterName { username } => {
                 let key = kad::RecordKey::new(&self.swarm.local_peer_id().to_bytes());
                 let record = kad::Record {
                     key,
-                    value: name.into_bytes(),
+                    value: username.into_bytes(),
                     publisher: None,
                     expires: None,
                 };
@@ -248,7 +248,7 @@ pub(super) enum Command {
         sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
     },
     RegisterName {
-        name: String,
+        username: String,
     },
     Dial {
         peer_id: PeerId,
