@@ -159,7 +159,6 @@ impl EventLoop {
                 };
             }
             Command::RegisterName { name } => {
-                println!("Register {name:?}");
                 let key = kad::RecordKey::new(&self.swarm.local_peer_id().to_bytes());
                 let record = kad::Record {
                     key,
