@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use futures::{channel, SinkExt};
 use libp2p::{core, gossipsub, kad, request_response, swarm, Multiaddr, PeerId};
 
@@ -70,7 +71,7 @@ impl EventLoop {
         record: kad::PutRecordResult,
     ) {
         match record {
-            Ok(kad::PutRecordOk {..}) => println!("Successfully stored record!"),
+            Ok(kad::PutRecordOk { .. }) => println!("Successfully stored record!"),
             Err(error) => eprintln!("Failed to store record: {error:?}"),
         }
     }
@@ -113,7 +114,7 @@ impl EventLoop {
             .pending_request_file
             .remove(&request_id)
             .expect("Request to still be pending.")
-            .send(Err(Box::new(error)));
+            .send(Err(anyhow!(error)));
     }
 
     pub(in crate::network::event_loop) fn handle_direct_messaging_message(
@@ -158,7 +159,7 @@ impl EventLoop {
             .pending_request_message
             .remove(&request_id)
             .expect("Message to still be pending.")
-            .send(Err(Box::new(error)));
+            .send(Err(anyhow!(error)));
     }
 
     pub(in crate::network::event_loop) fn handle_connection_established(
@@ -180,7 +181,7 @@ impl EventLoop {
     ) {
         if let Some(peer_id) = peer_id {
             if let Some(sender) = self.pending_dial.remove(&peer_id) {
-                let _ = sender.send(Err(Box::new(error)));
+                let _ = sender.send(Err(anyhow!(error)));
             }
         }
     }

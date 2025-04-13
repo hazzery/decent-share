@@ -1,4 +1,4 @@
-use std::{collections::HashSet, error::Error};
+use std::collections::HashSet;
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -16,10 +16,7 @@ pub(crate) struct Client {
 
 impl Client {
     /// Listen for incoming connections on the given address.
-    pub(crate) async fn start_listening(
-        &mut self,
-        addr: Multiaddr,
-    ) -> Result<(), Box<dyn Error + Send>> {
+    pub(crate) async fn start_listening(&mut self, addr: Multiaddr) -> Result<(), anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Command::StartListening { addr, sender })
@@ -33,7 +30,7 @@ impl Client {
         &mut self,
         peer_id: PeerId,
         peer_addr: Multiaddr,
-    ) -> Result<(), Box<dyn Error + Send>> {
+    ) -> Result<(), anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Command::Dial {
@@ -71,7 +68,7 @@ impl Client {
         &mut self,
         peer: PeerId,
         file_name: String,
-    ) -> Result<Vec<u8>, Box<dyn Error + Send>> {
+    ) -> Result<Vec<u8>, anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Command::RequestFile {
@@ -121,7 +118,7 @@ impl Client {
         &mut self,
         username: String,
         message: String,
-    ) -> Result<(), Box<dyn Error + Send>> {
+    ) -> Result<(), anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Command::DirectMessage {

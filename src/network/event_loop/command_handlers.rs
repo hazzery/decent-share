@@ -1,8 +1,6 @@
-use std::{
-    collections::{hash_map, HashSet},
-    error::Error,
-};
+use std::collections::{hash_map, HashSet};
 
+use anyhow::anyhow;
 use futures::channel::oneshot;
 use libp2p::{kad, multiaddr, request_response::ResponseChannel, Multiaddr, PeerId};
 
@@ -12,11 +10,11 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_start_listening(
         &mut self,
         address: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
         let _ = match self.swarm.listen_on(address) {
             Ok(_) => sender.send(Ok(())),
-            Err(e) => sender.send(Err(Box::new(e))),
+            Err(e) => sender.send(Err(anyhow!(e))),
         };
     }
 
@@ -58,7 +56,7 @@ impl EventLoop {
         &mut self,
         peer_id: PeerId,
         peer_addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
         if let hash_map::Entry::Vacant(e) = self.pending_dial.entry(peer_id) {
             self.swarm
@@ -73,7 +71,7 @@ impl EventLoop {
                     e.insert(sender);
                 }
                 Err(e) => {
-                    let _ = sender.send(Err(Box::new(e)));
+                    let _ = sender.send(Err(anyhow!(e)));
                 }
             }
         } else {
@@ -112,7 +110,7 @@ impl EventLoop {
         &mut self,
         file_name: String,
         peer: PeerId,
-        sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<Vec<u8>, anyhow::Error>>,
     ) {
         let request_id = self
             .swarm
@@ -146,14 +144,14 @@ impl EventLoop {
         &mut self,
         username: &str,
         message: String,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
-        if !self.username_store.contains_username(username) {
-            println!("Finding Peer ID for {username}");
-            self.handle_find_user(username.to_string());
-        }
         let Some(peer_id) = self.username_store.get_peer_id(username) else {
-            println!("It seems there is no user with this username!");
+            sender
+                .send(Err(anyhow!(
+                    "It seems there is no user with this username!"
+                )))
+                .expect("Receiver not to be dropped");
             return;
         };
         let request_id = self

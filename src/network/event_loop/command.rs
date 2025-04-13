@@ -9,7 +9,7 @@ use super::{EventLoop, FileResponse};
 pub(crate) enum Command {
     StartListening {
         addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), anyhow::Error>>,
     },
     RegisterName {
         username: String,
@@ -20,7 +20,7 @@ pub(crate) enum Command {
     Dial {
         peer_id: PeerId,
         peer_addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), anyhow::Error>>,
     },
     StartProviding {
         file_name: String,
@@ -33,7 +33,7 @@ pub(crate) enum Command {
     RequestFile {
         file_name: String,
         peer: PeerId,
-        sender: oneshot::Sender<Result<Vec<u8>, Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<Vec<u8>, anyhow::Error>>,
     },
     RespondFile {
         file: Vec<u8>,
@@ -45,7 +45,7 @@ pub(crate) enum Command {
     DirectMessage {
         username: String,
         message: String,
-        sender: oneshot::Sender<Result<(), Box<dyn Error + Send>>>,
+        sender: oneshot::Sender<Result<(), anyhow::Error>>,
     },
 }
 

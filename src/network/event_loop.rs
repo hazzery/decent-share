@@ -2,10 +2,7 @@ mod behaviour_handlers;
 mod command;
 mod command_handlers;
 
-use std::{
-    collections::{HashMap, HashSet},
-    error::Error,
-};
+use std::collections::{HashMap, HashSet};
 
 use futures::{
     channel::{mpsc, oneshot},
@@ -25,7 +22,7 @@ use super::{
 
 pub(super) use command::Command;
 
-type DynResult<T> = Result<T, Box<dyn Error + Send>>;
+type DynResult<T> = Result<T, anyhow::Error>;
 
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,

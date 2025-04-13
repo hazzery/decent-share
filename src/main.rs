@@ -65,7 +65,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
             "Provide" => {
                 let Some(file_path) = arguments.get(1) else {
-                    println!("Missing file path");
+                    println!("Missing file path and name for file");
                     continue;
                 };
                 let Some(name) = arguments.get(2) else {
@@ -98,7 +98,7 @@ async fn main() -> Result<(), anyhow::Error> {
             }
             "Dm" => {
                 let Some(username) = arguments.get(1) else {
-                    println!("Missing username");
+                    println!("Missing username and message");
                     continue;
                 };
                 let Some(message) = arguments.get(2) else {
