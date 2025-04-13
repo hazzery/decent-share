@@ -34,6 +34,7 @@ pub(crate) struct EventLoop {
     pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
     pending_request_file: HashMap<OutboundRequestId, oneshot::Sender<DynResult<Vec<u8>>>>,
     pending_request_message: HashMap<OutboundRequestId, oneshot::Sender<DynResult<()>>>,
+    pending_name_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<PeerId>>>,
     gossipsub_topic: gossipsub::IdentTopic,
 }
 
@@ -54,6 +55,7 @@ impl EventLoop {
             pending_get_providers: HashMap::default(),
             pending_request_file: HashMap::default(),
             pending_request_message: HashMap::default(),
+            pending_name_request: HashMap::default(),
             gossipsub_topic,
         }
     }
@@ -91,10 +93,11 @@ impl EventLoop {
 
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
+                    id,
                     result: kad::QueryResult::GetRecord(record),
                     ..
                 },
-            )) => self.handle_get_record(record),
+            )) => self.handle_get_record(record, id),
 
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {

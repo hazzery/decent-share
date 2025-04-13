@@ -1,6 +1,10 @@
 use anyhow::anyhow;
 use futures::{channel, SinkExt};
-use libp2p::{core, gossipsub, kad, request_response, swarm, Multiaddr, PeerId};
+use libp2p::{
+    core, gossipsub,
+    kad::{self, QueryId},
+    request_response, swarm, Multiaddr, PeerId,
+};
 
 use crate::network::{DirectMessage, DirectMessageResponse};
 
@@ -46,19 +50,18 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_get_record(
         &mut self,
         record: kad::GetRecordResult,
+        query_id: QueryId,
     ) {
         match record {
             Ok(kad::GetRecordOk::FoundRecord(kad::PeerRecord {
-                record: kad::Record { key, value, .. },
+                record: kad::Record { value, .. },
                 ..
             })) => {
-                let Ok(username) = String::from_utf8(key.to_vec()) else {
-                    eprintln!("Record key was not valid UTF-8");
-                    return;
-                };
-                let peer_id = PeerId::from_bytes(&value).unwrap();
-                println!("Found peer id for {username}");
-                self.username_store.insert(username, peer_id);
+                self.pending_name_request
+                    .remove(&query_id)
+                    .expect("Name request to still be pending")
+                    .send(PeerId::from_bytes(&value).map_err(|error| anyhow!(error)))
+                    .expect("Receiver not to be dropped");
             }
             Ok(_) => {}
             Err(error) => eprintln!("Failed to get record: {error:?}"),

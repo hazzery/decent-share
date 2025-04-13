@@ -1,4 +1,4 @@
-use std::{collections::HashSet, error::Error};
+use std::collections::HashSet;
 
 use futures::channel::oneshot;
 use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
@@ -16,6 +16,7 @@ pub(crate) enum Command {
     },
     FindUser {
         username: String,
+        sender: oneshot::Sender<Result<PeerId, anyhow::Error>>,
     },
     Dial {
         peer_id: PeerId,
@@ -43,7 +44,7 @@ pub(crate) enum Command {
         message: String,
     },
     DirectMessage {
-        username: String,
+        peer_id: PeerId,
         message: String,
         sender: oneshot::Sender<Result<(), anyhow::Error>>,
     },
@@ -54,7 +55,7 @@ impl EventLoop {
         match command {
             Command::StartListening { addr, sender } => self.handle_start_listening(addr, sender),
             Command::RegisterName { username } => self.handle_register_name(username),
-            Command::FindUser { username } => self.handle_find_user(username),
+            Command::FindUser { username, sender } => self.handle_find_user(username, sender),
             Command::Dial {
                 peer_id,
                 peer_addr,
@@ -74,11 +75,11 @@ impl EventLoop {
             Command::RespondFile { file, channel } => self.handle_respond_file(file, channel),
             Command::SendMessage { message } => self.handle_send_message(&message),
             Command::DirectMessage {
-                username,
+                peer_id,
                 message,
                 sender,
             } => {
-                self.handle_direct_message(&username, message, sender);
+                self.handle_direct_message(&peer_id, message, sender);
             }
         }
     }

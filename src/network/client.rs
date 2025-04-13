@@ -1,17 +1,22 @@
-use std::collections::HashSet;
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
+use anyhow::anyhow;
 use futures::{
     channel::{mpsc, oneshot},
     SinkExt,
 };
 use libp2p::{core::Multiaddr, request_response::ResponseChannel, PeerId};
 
-use super::event_loop::Command;
 use super::FileResponse;
+use super::{event_loop::Command, username_store::UsernameStore};
 
 #[derive(Clone)]
 pub(crate) struct Client {
     pub(super) sender: mpsc::Sender<Command>,
+    username_store: Arc<Mutex<UsernameStore>>,
 }
 
 impl Client {
@@ -100,11 +105,28 @@ impl Client {
             .expect("Name to register successfully");
     }
 
-    pub(crate) async fn find_user(&mut self, username: String) {
+    pub(crate) async fn find_user(&mut self, username: String) -> Option<PeerId> {
+        let (sender, receiver) = oneshot::channel();
         self.sender
-            .send(Command::FindUser { username })
+            .send(Command::FindUser {
+                username: username.clone(),
+                sender,
+            })
             .await
             .expect("Name to be successfully found");
+
+        let peer_id = match receiver.await.expect("Sender not be dropped.") {
+            Ok(peer_id) => peer_id,
+            Err(error) => {
+                eprintln!("{error:?}");
+                return None;
+            }
+        };
+        self.username_store
+            .lock()
+            .unwrap()
+            .insert(username, peer_id);
+        Some(peer_id)
     }
 
     pub(crate) async fn send_message(&mut self, message: String) {
@@ -120,9 +142,18 @@ impl Client {
         message: String,
     ) -> Result<(), anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
+
+        let peer_id = match self.username_store.lock().unwrap().get_peer_id(&username) {
+            Some(peer_id) => peer_id.clone(),
+            None => match self.find_user(username).await {
+                Some(peer_id) => peer_id,
+                None => return Err(anyhow!("The given username does not exist")),
+            },
+        };
+
         self.sender
             .send(Command::DirectMessage {
-                username,
+                peer_id,
                 message,
                 sender,
             })
