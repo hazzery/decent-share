@@ -1,5 +1,7 @@
 use futures::{channel, SinkExt};
-use libp2p::{core, gossipsub, kad, multiaddr, request_response, swarm, Multiaddr, PeerId};
+use libp2p::{core, gossipsub, kad, request_response, swarm, Multiaddr, PeerId};
+
+use crate::network::{DirectMessage, DirectMessageResponse};
 
 use super::{Event, EventLoop, FileRequest, FileResponse};
 
@@ -48,11 +50,15 @@ impl EventLoop {
             Ok(kad::GetRecordOk::FoundRecord(kad::PeerRecord {
                 record: kad::Record { key, value, .. },
                 ..
-            })) => println!(
-                "Got record {:?} {:?}",
-                std::str::from_utf8(key.as_ref()).unwrap(),
-                std::str::from_utf8(&value).unwrap(),
-            ),
+            })) => {
+                let Ok(username) = String::from_utf8(key.to_vec()) else {
+                    eprintln!("Record key was not valid UTF-8");
+                    return;
+                };
+                let peer_id = PeerId::from_bytes(&value).unwrap();
+                println!("Found peer id for {username}");
+                self.username_store.insert(username, peer_id);
+            }
             Ok(_) => {}
             Err(error) => eprintln!("Failed to get record: {error:?}"),
         }
@@ -64,11 +70,8 @@ impl EventLoop {
         record: kad::PutRecordResult,
     ) {
         match record {
-            Ok(kad::PutRecordOk { key }) => println!(
-                "Successfully put record {:?}",
-                PeerId::from_bytes(key.as_ref()) // std::str::from_utf8(key.as_ref()).unwrap()
-            ),
-            Err(error) => eprintln!("Failed to put record: {error:?}"),
+            Ok(kad::PutRecordOk {..}) => println!("Successfully stored record!"),
+            Err(error) => eprintln!("Failed to store record: {error:?}"),
         }
     }
 
@@ -113,13 +116,51 @@ impl EventLoop {
             .send(Err(Box::new(error)));
     }
 
-    pub(in crate::network::event_loop) fn handle_new_listen_address(&mut self, address: Multiaddr) {
-        let local_peer_id = *self.swarm.local_peer_id();
-        eprintln!(
-            "Local node is listening on {:?}",
-            address.with(multiaddr::Protocol::P2p(local_peer_id))
-        );
+    pub(in crate::network::event_loop) fn handle_direct_messaging_message(
+        &mut self,
+        message: request_response::Message<DirectMessage, DirectMessageResponse>,
+        peer: PeerId,
+    ) {
+        match message {
+            request_response::Message::Request {
+                request, channel, ..
+            } => {
+                println!("You have received a direct message:");
+                match self.username_store.get_username(&peer) {
+                    Some(username) => println!("From {username}: {}", request.0),
+                    None => println!("From {peer}: {}", request.0),
+                }
+
+                self.swarm
+                    .behaviour_mut()
+                    .direct_messaging
+                    .send_response(channel, DirectMessageResponse())
+                    .expect("The read receipt to be sent");
+            }
+            request_response::Message::Response { request_id, .. } => {
+                println!("A direct messaging response has arrived");
+                let _ = self
+                    .pending_request_message
+                    .remove(&request_id)
+                    .expect("Message to still be pending.")
+                    .send(Ok(()));
+            }
+        }
     }
+
+    pub(in crate::network::event_loop) fn handle_direct_messaging_outbound_failure(
+        &mut self,
+        request_id: request_response::OutboundRequestId,
+        error: request_response::OutboundFailure,
+    ) {
+        println!("A direct messaging failure has occured: {error:?}");
+        let _ = self
+            .pending_request_message
+            .remove(&request_id)
+            .expect("Message to still be pending.")
+            .send(Err(Box::new(error)));
+    }
+
     pub(in crate::network::event_loop) fn handle_connection_established(
         &mut self,
         peer_id: &PeerId,
@@ -166,7 +207,6 @@ impl EventLoop {
         list: &Vec<(PeerId, Multiaddr)>,
     ) {
         for (peer_id, _multiaddr) in list {
-            println!("mDNS discover peer has expired: {peer_id}");
             self.swarm
                 .behaviour_mut()
                 .gossipsub
@@ -177,12 +217,15 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_gossipsub_message(
         &mut self,
         message: &gossipsub::Message,
-        id: &gossipsub::MessageId,
         peer_id: &PeerId,
     ) {
-        println!(
-            "Got message: '{}' with id: {id} from peer: {peer_id}",
-            String::from_utf8_lossy(&message.data),
-        );
+        let message = String::from_utf8_lossy(&message.data);
+
+        println!("Received new global chat!");
+
+        match self.username_store.get_username(peer_id) {
+            Some(username) => println!("From {username}: '{message}'"),
+            None => println!("From {peer_id}: '{message}'"),
+        }
     }
 }

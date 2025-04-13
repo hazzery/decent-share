@@ -1,5 +1,6 @@
 mod client;
 mod event_loop;
+mod username_store;
 
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -22,6 +23,7 @@ pub(crate) use event_loop::{Event, EventLoop};
 #[derive(NetworkBehaviour)]
 struct Behaviour {
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
+    direct_messaging: request_response::cbor::Behaviour<DirectMessage, DirectMessageResponse>,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
@@ -33,6 +35,12 @@ struct FileRequest(String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FileResponse(Vec<u8>);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DirectMessage(String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DirectMessageResponse();
 
 /// Creates the network components, namely:
 ///
@@ -85,6 +93,13 @@ pub(crate) fn new(
                 request_response: request_response::cbor::Behaviour::new(
                     [(
                         StreamProtocol::new("/file-exchange/1"),
+                        ProtocolSupport::Full,
+                    )],
+                    request_response::Config::default(),
+                ),
+                direct_messaging: request_response::cbor::Behaviour::new(
+                    [(
+                        StreamProtocol::new("/direct-message/1"),
                         ProtocolSupport::Full,
                     )],
                     request_response::Config::default(),

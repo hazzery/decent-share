@@ -2,7 +2,7 @@ use std::{collections::HashSet, error::Error};
 
 use futures::{
     channel::{mpsc, oneshot},
-    prelude::*,
+    SinkExt,
 };
 use libp2p::{core::Multiaddr, request_response::ResponseChannel, PeerId};
 
@@ -103,10 +103,34 @@ impl Client {
             .expect("Name to register successfully");
     }
 
+    pub(crate) async fn find_user(&mut self, username: String) {
+        self.sender
+            .send(Command::FindUser { username })
+            .await
+            .expect("Name to be successfully found");
+    }
+
     pub(crate) async fn send_message(&mut self, message: String) {
         self.sender
             .send(Command::SendMessage { message })
             .await
             .expect("Message to send successfully");
+    }
+
+    pub(crate) async fn direct_message(
+        &mut self,
+        username: String,
+        message: String,
+    ) -> Result<(), Box<dyn Error + Send>> {
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Command::DirectMessage {
+                username,
+                message,
+                sender,
+            })
+            .await
+            .expect("Direct message to send successfully");
+        receiver.await.expect("Command receiver to not be dropped")
     }
 }

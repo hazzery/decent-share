@@ -81,10 +81,37 @@ async fn main() -> Result<(), anyhow::Error> {
                 };
                 handle_get(name, &mut network_client).await?;
             }
+            "Register" => {
+                let Some(username) = arguments.get(1) else {
+                    println!("Missing username");
+                    continue;
+                };
 
-            action => {
-                println!("Unknown action {action}");
+                network_client.register_username(username.clone()).await;
             }
+            "Find" => {
+                let Some(username) = arguments.get(1) else {
+                    println!("Missing username");
+                    continue;
+                };
+                network_client.find_user(username.clone()).await;
+            }
+            "Dm" => {
+                let Some(username) = arguments.get(1) else {
+                    println!("Missing username");
+                    continue;
+                };
+                let Some(message) = arguments.get(2) else {
+                    println!("Missing message");
+                    continue;
+                };
+                network_client
+                    .direct_message(username.clone(), message.clone())
+                    .await
+                    .expect("Direct message failed");
+            }
+
+            action => println!("Unknown action {action}"),
         };
     }
 }
