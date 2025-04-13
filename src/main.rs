@@ -22,7 +22,6 @@ mod action;
 mod network;
 
 use action::{handle_get, handle_provide, handle_send};
-use anyhow::anyhow;
 use clap::Parser;
 use tokio::io::AsyncBufReadExt;
 use tracing_subscriber::EnvFilter;
@@ -52,7 +51,8 @@ async fn main() -> Result<(), anyhow::Error> {
 
         let arguments = split_string(&command);
         let Some(action) = arguments.first() else {
-            return Err(anyhow!("No action specified"));
+            println!("No action specified");
+            continue;
         };
 
         match action.as_str() {
