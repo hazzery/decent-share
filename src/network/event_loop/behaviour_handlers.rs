@@ -5,8 +5,9 @@ use libp2p::{
     kad::{self, QueryId},
     request_response, swarm, Multiaddr, PeerId,
 };
+use std::borrow::ToOwned;
 
-use crate::network::{DirectMessage, DirectMessageResponse};
+use crate::network::{DirectMessage, DirectMessageResponse, TradeOffer, TradeResponse};
 
 use super::{Event, EventLoop, FileRequest, FileResponse};
 
@@ -54,14 +55,20 @@ impl EventLoop {
     ) {
         match record {
             Ok(kad::GetRecordOk::FoundRecord(kad::PeerRecord {
-                record: kad::Record { value, .. },
+                record: kad::Record { key, value, .. },
                 ..
             })) => {
-                self.pending_name_request
-                    .remove(&query_id)
-                    .expect("Name request to still be pending")
-                    .send(PeerId::from_bytes(&value).map_err(|error| anyhow!(error)))
-                    .expect("Receiver not to be dropped");
+                if let Some(sender) = self.pending_name_request.remove(&query_id) {
+                    let peer_id = PeerId::from_bytes(&value).map_err(|error| anyhow!(error));
+
+                    if let Ok(peer_id) = peer_id {
+                        if let Ok(username) = String::from_utf8(key.to_vec()) {
+                            self.peer_id_username_map.insert(peer_id, username);
+                        }
+                    }
+
+                    sender.send(peer_id).expect("Receiver not to be dropped");
+                }
             }
             Ok(_) => {}
             Err(error) => eprintln!("Failed to get record: {error:?}"),
@@ -130,7 +137,7 @@ impl EventLoop {
                 request, channel, ..
             } => {
                 println!("You have received a direct message:");
-                match self.username_store.get_username(&peer) {
+                match self.peer_id_username_map.get(&peer) {
                     Some(username) => println!("From {username}: {}", request.0),
                     None => println!("From {peer}: {}", request.0),
                 }
@@ -139,7 +146,7 @@ impl EventLoop {
                     .behaviour_mut()
                     .direct_messaging
                     .send_response(channel, DirectMessageResponse())
-                    .expect("The read receipt to be sent");
+                    .expect("The response to be sent");
             }
             request_response::Message::Response { request_id, .. } => {
                 println!("A direct messaging response has arrived");
@@ -160,6 +167,52 @@ impl EventLoop {
         println!("A direct messaging failure has occured: {error:?}");
         let _ = self
             .pending_request_message
+            .remove(&request_id)
+            .expect("Message to still be pending.")
+            .send(Err(anyhow!(error)));
+    }
+
+    pub(in crate::network::event_loop) async fn handle_file_trade_message(
+        &mut self,
+        message: request_response::Message<TradeOffer, TradeResponse>,
+        peer: PeerId,
+    ) {
+        match message {
+            request_response::Message::Request {
+                request, channel, ..
+            } => {
+                let username = self.peer_id_username_map.get(&peer).map(ToOwned::to_owned);
+                self.event_sender
+                    .send(Event::InboundTradeOffer {
+                        offered_file: request.0,
+                        username,
+                        requested_file: request.1,
+                        channel,
+                    })
+                    .await
+                    .expect("Event receiver not to be dropped");
+            }
+            request_response::Message::Response {
+                request_id,
+                response,
+            } => {
+                let _ = self
+                    .pending_request_trade
+                    .remove(&request_id)
+                    .expect("Request to still be pending.")
+                    .send(Ok(response.0));
+            }
+        }
+    }
+
+    pub(in crate::network::event_loop) fn handle_file_trade_outbound_failure(
+        &mut self,
+        request_id: request_response::OutboundRequestId,
+        error: request_response::OutboundFailure,
+    ) {
+        println!("A trade offer failure has occured: {error:?}");
+        let _ = self
+            .pending_request_trade
             .remove(&request_id)
             .expect("Message to still be pending.")
             .send(Err(anyhow!(error)));
@@ -227,7 +280,7 @@ impl EventLoop {
 
         println!("Received new global chat!");
 
-        match self.username_store.get_username(peer_id) {
+        match self.peer_id_username_map.get(peer_id) {
             Some(username) => println!("From {username}: '{message}'"),
             None => println!("From {peer_id}: '{message}'"),
         }

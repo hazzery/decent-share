@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use futures::channel::oneshot;
 use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
 
-use super::{EventLoop, FileResponse};
+use super::{EventLoop, FileResponse, TradeResponse};
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -22,6 +22,16 @@ pub(crate) enum Command {
         peer_id: PeerId,
         peer_addr: Multiaddr,
         sender: oneshot::Sender<Result<(), anyhow::Error>>,
+    },
+    MakeOffer {
+        offered_file_name: String,
+        peer_id: PeerId,
+        requested_file_name: String,
+        sender: oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>,
+    },
+    RespondTrade {
+        response: Option<Vec<u8>>,
+        channel: ResponseChannel<TradeResponse>,
     },
     StartProviding {
         file_name: String,
@@ -61,6 +71,15 @@ impl EventLoop {
                 peer_addr,
                 sender,
             } => self.handle_dial(peer_id, peer_addr, sender),
+            Command::MakeOffer {
+                offered_file_name,
+                peer_id,
+                requested_file_name,
+                sender,
+            } => self.handle_make_offer(offered_file_name, peer_id, requested_file_name, sender),
+            Command::RespondTrade { response, channel } => {
+                self.handle_respond_trade(response, channel)
+            }
             Command::StartProviding { file_name, sender } => {
                 self.handle_start_providing(file_name, sender);
             }

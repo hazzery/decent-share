@@ -15,10 +15,7 @@ use libp2p::{
     PeerId,
 };
 
-use super::{
-    username_store::UsernameStore, Behaviour, BehaviourEvent, DirectMessage, FileRequest,
-    FileResponse,
-};
+use super::{Behaviour, BehaviourEvent, DirectMessage, FileRequest, FileResponse, TradeResponse};
 
 pub(super) use command::Command;
 
@@ -28,12 +25,13 @@ pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
-    username_store: UsernameStore,
+    peer_id_username_map: HashMap<PeerId, String>,
     pending_dial: HashMap<PeerId, oneshot::Sender<DynResult<()>>>,
     pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
     pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
     pending_request_file: HashMap<OutboundRequestId, oneshot::Sender<DynResult<Vec<u8>>>>,
     pending_request_message: HashMap<OutboundRequestId, oneshot::Sender<DynResult<()>>>,
+    pending_request_trade: HashMap<OutboundRequestId, oneshot::Sender<DynResult<Option<Vec<u8>>>>>,
     pending_name_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<PeerId>>>,
     gossipsub_topic: gossipsub::IdentTopic,
 }
@@ -49,12 +47,13 @@ impl EventLoop {
             swarm,
             command_receiver,
             event_sender,
-            username_store: UsernameStore::default(),
+            peer_id_username_map: HashMap::default(),
             pending_dial: HashMap::default(),
             pending_start_providing: HashMap::default(),
             pending_get_providers: HashMap::default(),
             pending_request_file: HashMap::default(),
             pending_request_message: HashMap::default(),
+            pending_request_trade: HashMap::default(),
             pending_name_request: HashMap::default(),
             gossipsub_topic,
         }
@@ -126,6 +125,16 @@ impl EventLoop {
                 },
             )) => self.handle_direct_messaging_outbound_failure(request_id, error),
 
+            SwarmEvent::Behaviour(BehaviourEvent::FileTrading(
+                request_response::Event::Message { peer, message, .. },
+            )) => self.handle_file_trade_message(message, peer).await,
+
+            SwarmEvent::Behaviour(BehaviourEvent::FileTrading(
+                request_response::Event::OutboundFailure {
+                    request_id, error, ..
+                },
+            )) => self.handle_file_trade_outbound_failure(request_id, error),
+
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
             } => self.handle_connection_established(&peer_id, &endpoint),
@@ -148,10 +157,15 @@ impl EventLoop {
                 ..
             })) => self.handle_gossipsub_message(&message, &peer_id),
 
+            SwarmEvent::Behaviour(BehaviourEvent::FileTrading(
+                request_response::Event::InboundFailure { error, .. },
+            )) => self.handle_file_trade_inbound_failure(error),
+
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)
                 | BehaviourEvent::RequestResponse(request_response::Event::ResponseSent { .. })
                 | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
+                | BehaviourEvent::FileTrading(request_response::Event::ResponseSent { .. })
                 | BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed { .. }),
             )
             | SwarmEvent::Dialing { .. }
@@ -171,5 +185,11 @@ pub(crate) enum Event {
     InboundRequest {
         request: String,
         channel: ResponseChannel<FileResponse>,
+    },
+    InboundTradeOffer {
+        offered_file: String,
+        username: Option<String>,
+        requested_file: String,
+        channel: ResponseChannel<TradeResponse>,
     },
 }

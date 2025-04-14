@@ -19,17 +19,24 @@
 // DEALINGS IN THE SOFTWARE.
 
 mod action;
+mod interface;
 mod network;
 
-use action::{handle_get, handle_provide, handle_send};
 use clap::Parser;
+use futures::StreamExt;
 use tokio::io::AsyncBufReadExt;
 use tracing_subscriber::EnvFilter;
+
+use interface::{handle_network_event, handle_std_in};
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
+        .with_env_filter(
+            EnvFilter::builder()
+                .with_default_directive(tracing_subscriber::filter::LevelFilter::WARN.into())
+                .from_env_lossy(),
+        )
         .try_init();
 
     let opt = Opt::parse();
@@ -40,79 +47,12 @@ async fn main() -> Result<(), anyhow::Error> {
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());
 
-    network_client.register_username(opt.username).await;
-
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     loop {
-        print!("Enter command:\n>");
-        let Ok(Some(command)) = stdin.next_line().await else {
-            continue;
-        };
-
-        let arguments = split_string(&command);
-        let Some(action) = arguments.first() else {
-            println!("No action specified");
-            continue;
-        };
-
-        match action.as_str() {
-            "Send" => {
-                let Some(message) = arguments.get(1) else {
-                    println!("Missing message content");
-                    continue;
-                };
-                handle_send(message, &mut network_client).await;
-            }
-            "Provide" => {
-                let Some(file_path) = arguments.get(1) else {
-                    println!("Missing file path and name for file");
-                    continue;
-                };
-                let Some(name) = arguments.get(2) else {
-                    println!("Missing name for file");
-                    continue;
-                };
-                handle_provide(name, file_path, &mut network_client, &mut network_events).await?;
-            }
-            "Get" => {
-                let Some(name) = arguments.get(1) else {
-                    println!("Missing name for file to recieve");
-                    continue;
-                };
-                handle_get(name, &mut network_client).await?;
-            }
-            "Register" => {
-                let Some(username) = arguments.get(1) else {
-                    println!("Missing username");
-                    continue;
-                };
-
-                network_client.register_username(username.clone()).await;
-            }
-            "Find" => {
-                let Some(username) = arguments.get(1) else {
-                    println!("Missing username");
-                    continue;
-                };
-                network_client.find_user(username.clone()).await;
-            }
-            "Dm" => {
-                let Some(username) = arguments.get(1) else {
-                    println!("Missing username and message");
-                    continue;
-                };
-                let Some(message) = arguments.get(2) else {
-                    println!("Missing message");
-                    continue;
-                };
-                network_client
-                    .direct_message(username.clone(), message.clone())
-                    .await
-                    .expect("Direct message failed");
-            }
-
-            action => println!("Unknown action {action}"),
-        };
+        tokio::select! {
+            command = stdin.next_line() => handle_std_in(command, &mut network_client).await?,
+            event = network_events.next() => handle_network_event(event, &mut network_client).await,
+        }
     }
 }
 
@@ -125,11 +65,4 @@ struct Opt {
 
     #[arg(long, short)]
     username: String,
-}
-
-fn split_string(input: &str) -> Vec<String> {
-    let re = regex::Regex::new(r#""([^"]*)"|\S+"#).unwrap();
-    re.captures_iter(input)
-        .map(|cap| cap.get(0).unwrap().as_str().to_string())
-        .collect()
 }

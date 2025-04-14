@@ -1,22 +1,37 @@
 use std::{
-    collections::HashSet,
+    borrow::ToOwned,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
-use anyhow::anyhow;
 use futures::{
     channel::{mpsc, oneshot},
     SinkExt,
 };
 use libp2p::{core::Multiaddr, request_response::ResponseChannel, PeerId};
 
-use super::FileResponse;
-use super::{event_loop::Command, username_store::UsernameStore};
+use super::{event_loop::Command, FileResponse, TradeResponse};
 
 #[derive(Clone)]
 pub(crate) struct Client {
     pub(super) sender: mpsc::Sender<Command>,
-    username_store: Arc<Mutex<UsernameStore>>,
+    pub(super) username_peer_id_map: Arc<Mutex<HashMap<String, PeerId>>>,
+}
+
+impl Client {
+    async fn get_peer_id(&mut self, username: String) -> Result<PeerId, anyhow::Error> {
+        let peer_id = self
+            .username_peer_id_map
+            .lock()
+            .unwrap()
+            .get(&username)
+            .map(ToOwned::to_owned);
+
+        match peer_id {
+            Some(peer_id) => Ok(peer_id),
+            None => self.find_user(username).await,
+        }
+    }
 }
 
 impl Client {
@@ -46,6 +61,38 @@ impl Client {
             .await
             .expect("Command receiver not to be dropped.");
         receiver.await.expect("Sender not to be dropped.")
+    }
+
+    pub(crate) async fn offer_trade(
+        &mut self,
+        offered_file_name: String,
+        recipient_username: String,
+        requested_file_name: String,
+    ) -> Result<Option<Vec<u8>>, anyhow::Error> {
+        let peer_id = self.get_peer_id(recipient_username).await?;
+
+        let (sender, receiver) = oneshot::channel();
+        self.sender
+            .send(Command::MakeOffer {
+                offered_file_name,
+                peer_id,
+                requested_file_name,
+                sender,
+            })
+            .await
+            .expect("Command receiver not to be dropped.");
+        receiver.await.expect("Sender not to be dropped")
+    }
+
+    pub(crate) async fn respond_to_trade(
+        &mut self,
+        response: Option<Vec<u8>>,
+        channel: ResponseChannel<TradeResponse>,
+    ) {
+        self.sender
+            .send(Command::RespondTrade { response, channel })
+            .await
+            .expect("Command receiver to not be dropped");
     }
 
     /// Advertise the local node as the provider of the given file on the DHT.
@@ -105,7 +152,7 @@ impl Client {
             .expect("Name to register successfully");
     }
 
-    pub(crate) async fn find_user(&mut self, username: String) -> Option<PeerId> {
+    pub(crate) async fn find_user(&mut self, username: String) -> Result<PeerId, anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
         self.sender
             .send(Command::FindUser {
@@ -113,20 +160,18 @@ impl Client {
                 sender,
             })
             .await
-            .expect("Name to be successfully found");
+            .expect("Error sending FindUser command");
 
-        let peer_id = match receiver.await.expect("Sender not be dropped.") {
-            Ok(peer_id) => peer_id,
-            Err(error) => {
-                eprintln!("{error:?}");
-                return None;
-            }
-        };
-        self.username_store
-            .lock()
-            .unwrap()
-            .insert(username, peer_id);
-        Some(peer_id)
+        let peer_id = receiver.await.expect("Sender not be dropped.");
+
+        if let Ok(peer_id) = peer_id {
+            self.username_peer_id_map
+                .lock()
+                .unwrap()
+                .insert(username, peer_id);
+        }
+
+        peer_id
     }
 
     pub(crate) async fn send_message(&mut self, message: String) {
@@ -143,13 +188,7 @@ impl Client {
     ) -> Result<(), anyhow::Error> {
         let (sender, receiver) = oneshot::channel();
 
-        let peer_id = match self.username_store.lock().unwrap().get_peer_id(&username) {
-            Some(peer_id) => peer_id.clone(),
-            None => match self.find_user(username).await {
-                Some(peer_id) => peer_id,
-                None => return Err(anyhow!("The given username does not exist")),
-            },
-        };
+        let peer_id = self.get_peer_id(username).await?;
 
         self.sender
             .send(Command::DirectMessage {

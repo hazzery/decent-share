@@ -18,21 +18,11 @@ impl UsernameStore {
     }
 
     pub fn get_username(&self, peer_id: &PeerId) -> Option<&String> {
-        let cached_value = self.peer_id_username_map.get(peer_id);
-        if cached_value.is_some() {
-            return cached_value;
-        }
-        // network_client.find_user()
-        todo!("Find username for given Peer ID");
+        self.peer_id_username_map.get(peer_id)
     }
 
     pub fn get_peer_id(&self, username: &str) -> Option<&PeerId> {
-        let cached_value = self.username_peer_id_map.get(username);
-        if cached_value.is_some() {
-            return cached_value;
-        }
-        // network_client.find_user(username)
-        todo!("Find Peeer ID of given username");
+        self.username_peer_id_map.get(username)
     }
 
     pub fn insert(&mut self, username: String, peer_id: PeerId) {

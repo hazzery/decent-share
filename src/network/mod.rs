@@ -1,9 +1,9 @@
 mod client;
 mod event_loop;
-mod username_store;
 
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
+    sync::Arc,
     time::Duration,
 };
 
@@ -23,6 +23,7 @@ pub(crate) use event_loop::{Event, EventLoop};
 #[derive(NetworkBehaviour)]
 struct Behaviour {
     request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
+    file_trading: request_response::cbor::Behaviour<TradeOffer, TradeResponse>,
     direct_messaging: request_response::cbor::Behaviour<DirectMessage, DirectMessageResponse>,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
     gossipsub: gossipsub::Behaviour,
@@ -35,6 +36,12 @@ struct FileRequest(String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct FileResponse(Vec<u8>);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct TradeOffer(String, String);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct TradeResponse(Option<Vec<u8>>);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct DirectMessage(String);
@@ -97,6 +104,13 @@ pub(crate) fn new(
                     )],
                     request_response::Config::default(),
                 ),
+                file_trading: request_response::cbor::Behaviour::new(
+                    [(
+                        StreamProtocol::new("/file-trade/1"),
+                        ProtocolSupport::Full,
+                    )],
+                    request_response::Config::default(),
+                ),
                 direct_messaging: request_response::cbor::Behaviour::new(
                     [(
                         StreamProtocol::new("/direct-message/1"),
@@ -135,6 +149,7 @@ pub(crate) fn new(
     Ok((
         Client {
             sender: command_sender,
+            username_peer_id_map: Arc::default(),
         },
         event_receiver,
         EventLoop::new(swarm, command_receiver, event_sender, topic),

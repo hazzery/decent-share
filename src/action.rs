@@ -1,36 +1,52 @@
-use std::io::Write;
+use std::str::FromStr;
+use std::{io::Write, path::PathBuf};
 
 use anyhow::anyhow;
 use futures::FutureExt;
-use futures::{Stream, StreamExt};
 
-use crate::network::{Client, Event};
+use crate::network::Client;
 
 pub(crate) async fn handle_send(message: &str, network_client: &mut Client) {
     network_client.send_message(message.to_string()).await;
 }
-pub(crate) async fn handle_provide(
-    name: &String,
-    file_path: &str,
+pub(crate) async fn handle_trade(
+    offered_file_name: &str,
+    offered_file_path: &str,
+    username: &str,
+    requested_file_name: &str,
+    requested_file_path: &str,
     network_client: &mut Client,
-    network_events: &mut (impl Stream<Item = Event> + Unpin),
 ) -> Result<(), anyhow::Error> {
-    // Advertise oneself as a provider of the file on the DHT.
-    network_client.start_providing(name.clone()).await;
-
-    loop {
-        match network_events.next().await {
-            // Reply with the content of the file on incoming requests.
-            Some(Event::InboundRequest { request, channel }) => {
-                if &request == name {
-                    network_client
-                        .respond_file(std::fs::read(file_path)?, channel)
-                        .await;
-                }
-            }
-            e => todo!("{:?}", e),
+    let offered_path = PathBuf::from_str(offered_file_path)?;
+    if !offered_path.is_file() {
+        return Err(anyhow!(
+            "The provided path to the offered file does not point to a file!"
+        ));
+    }
+    let requested_path = PathBuf::from_str(requested_file_path)?;
+    if requested_path.exists() {
+        return Err(anyhow!("Provided path to place the requested file already exists!, please provided a path to write the file to"));
+    }
+    if let Some(parent) = requested_path.parent() {
+        if !parent.is_dir() {
+            return Err(anyhow!("Provided path to place the requested file is not valid. parent of provided filename must be a directory"));
         }
     }
+
+    let requested_file_bytes = network_client
+        .offer_trade(
+            offered_file_name.to_string(),
+            username.to_string(),
+            requested_file_name.to_string(),
+        )
+        .await?;
+
+    match requested_file_bytes {
+        Some(bytes) => tokio::fs::write(requested_path, bytes).await?,
+        None => println!("The recipient declined your trade offer!"),
+    };
+
+    Ok(())
 }
 
 pub(crate) async fn handle_get(
