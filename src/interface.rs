@@ -19,15 +19,15 @@ pub(crate) async fn handle_std_in(
         return Ok(());
     };
 
-    match action.as_str() {
-        "Send" => {
+    match action.to_lowercase().as_str() {
+        "send" => {
             let Some(message) = arguments.get(1) else {
                 println!("Missing message content");
                 return Ok(());
             };
             handle_send(message, network_client).await;
         }
-        "Trade" => {
+        "trade" => {
             let Some(offered_file_name) = arguments.get(1) else {
                 println!("Usage: Offer <name_of_offered_file> <path_to_offered_file> <recipient_username> <name_of_requested_file> <path_to_put_requested_file>");
                 return Ok(());
@@ -59,14 +59,14 @@ pub(crate) async fn handle_std_in(
             )
             .await?;
         }
-        "Get" => {
+        "get" => {
             let Some(name) = arguments.get(1) else {
                 println!("Missing name for file to recieve");
                 return Ok(());
             };
             handle_get(name, network_client).await?;
         }
-        "Register" => {
+        "register" => {
             let Some(username) = arguments.get(1) else {
                 println!("Missing username");
                 return Ok(());
@@ -74,14 +74,14 @@ pub(crate) async fn handle_std_in(
 
             network_client.register_username(username.clone()).await;
         }
-        "Find" => {
+        "find" => {
             let Some(username) = arguments.get(1) else {
                 println!("Missing username");
                 return Ok(());
             };
             let _ = network_client.find_user(username.clone()).await;
         }
-        "Dm" => {
+        "dm" => {
             let Some(username) = arguments.get(1) else {
                 println!("Missing username and message");
                 return Ok(());
