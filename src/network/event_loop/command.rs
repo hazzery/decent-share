@@ -1,16 +1,12 @@
-use std::collections::HashSet;
+use std::path::PathBuf;
 
 use futures::channel::oneshot;
-use libp2p::{request_response::ResponseChannel, Multiaddr, PeerId};
+use libp2p::PeerId;
 
-use super::{EventLoop, FileResponse, TradeResponse};
+use super::EventLoop;
 
 #[derive(Debug)]
 pub(crate) enum Command {
-    StartListening {
-        addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
-    },
     RegisterName {
         username: String,
     },
@@ -18,37 +14,19 @@ pub(crate) enum Command {
         username: String,
         sender: oneshot::Sender<Result<PeerId, anyhow::Error>>,
     },
-    Dial {
-        peer_id: PeerId,
-        peer_addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
-    },
     MakeOffer {
         offered_file_name: String,
+        offered_file_bytes: Vec<u8>,
         peer_id: PeerId,
         requested_file_name: String,
-        sender: oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>,
+        requested_file_path: PathBuf,
     },
     RespondTrade {
-        response: Option<Vec<u8>>,
-        channel: ResponseChannel<TradeResponse>,
-    },
-    StartProviding {
-        file_name: String,
-        sender: oneshot::Sender<()>,
-    },
-    GetProviders {
-        file_name: String,
-        sender: oneshot::Sender<HashSet<PeerId>>,
-    },
-    RequestFile {
-        file_name: String,
-        peer: PeerId,
-        sender: oneshot::Sender<Result<Vec<u8>, anyhow::Error>>,
-    },
-    RespondFile {
-        file: Vec<u8>,
-        channel: ResponseChannel<FileResponse>,
+        peer_id: PeerId,
+        requested_file_name: String,
+        offered_file_name: String,
+        requested_file_bytes: Option<Vec<u8>>,
+        offered_bytes_sender: Option<oneshot::Sender<Option<Vec<u8>>>>,
     },
     SendMessage {
         message: String,
@@ -63,35 +41,34 @@ pub(crate) enum Command {
 impl EventLoop {
     pub fn handle_command(&mut self, command: Command) {
         match command {
-            Command::StartListening { addr, sender } => self.handle_start_listening(addr, sender),
-            Command::RegisterName { username } => self.handle_register_name(username),
-            Command::FindUser { username, sender } => self.handle_find_user(username, sender),
-            Command::Dial {
-                peer_id,
-                peer_addr,
-                sender,
-            } => self.handle_dial(peer_id, peer_addr, sender),
+            Command::RegisterName { username } => self.handle_register_name(&username),
+            Command::FindUser { username, sender } => self.handle_find_user(&username, sender),
             Command::MakeOffer {
                 offered_file_name,
+                offered_file_bytes,
                 peer_id,
                 requested_file_name,
+                requested_file_path,
+            } => self.handle_make_offer(
+                offered_file_name,
+                offered_file_bytes,
+                peer_id,
+                requested_file_name,
+                requested_file_path,
+            ),
+            Command::RespondTrade {
+                peer_id,
+                requested_file_name,
+                offered_file_name,
+                requested_file_bytes,
+                offered_bytes_sender: sender,
+            } => self.handle_respond_trade(
+                peer_id,
+                requested_file_name,
+                offered_file_name,
+                requested_file_bytes,
                 sender,
-            } => self.handle_make_offer(offered_file_name, peer_id, requested_file_name, sender),
-            Command::RespondTrade { response, channel } => {
-                self.handle_respond_trade(response, channel)
-            }
-            Command::StartProviding { file_name, sender } => {
-                self.handle_start_providing(file_name, sender);
-            }
-            Command::GetProviders { file_name, sender } => {
-                self.handle_get_providers(file_name, sender);
-            }
-            Command::RequestFile {
-                file_name,
-                peer,
-                sender,
-            } => self.handle_request_file(file_name, peer, sender),
-            Command::RespondFile { file, channel } => self.handle_respond_file(file, channel),
+            ),
             Command::SendMessage { message } => self.handle_send_message(&message),
             Command::DirectMessage {
                 peer_id,

@@ -1,5 +1,5 @@
 use anyhow::anyhow;
-use futures::{channel, SinkExt};
+use futures::SinkExt;
 use libp2p::{
     core, gossipsub,
     kad::{self, QueryId},
@@ -7,46 +7,11 @@ use libp2p::{
 };
 use std::borrow::ToOwned;
 
-use crate::network::{DirectMessage, DirectMessageResponse, TradeOffer, TradeResponse};
+use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
-use super::{Event, EventLoop, FileRequest, FileResponse};
+use super::{Event, EventLoop};
 
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_pending_start_providing(
-        &mut self,
-        id: kad::QueryId,
-    ) {
-        let sender: channel::oneshot::Sender<()> = self
-            .pending_start_providing
-            .remove(&id)
-            .expect("Completed query to be previously pending.");
-        let _ = sender.send(());
-    }
-
-    pub(in crate::network::event_loop) fn handle_found_providers(
-        &mut self,
-        id: kad::QueryId,
-        providers: kad::GetProvidersResult,
-    ) {
-        match providers {
-            Ok(kad::GetProvidersOk::FoundProviders { providers, .. }) => {
-                if let Some(sender) = self.pending_get_providers.remove(&id) {
-                    sender.send(providers).expect("Receiver not to be dropped");
-
-                    // Finish the query. We are only interested in the first result.
-                    self.swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .query_mut(&id)
-                        .unwrap()
-                        .finish();
-                }
-            }
-            Ok(_) => {}
-            Err(error) => eprintln!("Failed to get providers: {error:?}"),
-        }
-    }
-
     #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_get_record(
         &mut self,
@@ -68,6 +33,16 @@ impl EventLoop {
                     }
 
                     sender.send(peer_id).expect("Receiver not to be dropped");
+                } else if let Some(sender) = self.pending_username_request.remove(&query_id) {
+                    let username = String::from_utf8(value).map_err(|error| anyhow!(error));
+
+                    if let Ok(ref username) = username {
+                        if let Ok(peer_id) = PeerId::from_bytes(&key.to_vec()) {
+                            self.peer_id_username_map
+                                .insert(peer_id, username.to_owned());
+                        }
+                    }
+                    sender.send(username).expect("Receiver not to be dropped");
                 }
             }
             Ok(_) => {}
@@ -86,70 +61,31 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) async fn handle_request_response_message(
+    pub(in crate::network::event_loop) async fn handle_direct_messaging_message(
         &mut self,
-        message: request_response::Message<FileRequest, FileResponse>,
-    ) {
-        match message {
-            request_response::Message::Request {
-                request, channel, ..
-            } => {
-                self.event_sender
-                    .send(Event::InboundRequest {
-                        request: request.0,
-                        channel,
-                    })
-                    .await
-                    .expect("Event receiver not to be dropped.");
-            }
-            request_response::Message::Response {
-                request_id,
-                response,
-            } => {
-                let _ = self
-                    .pending_request_file
-                    .remove(&request_id)
-                    .expect("Request to still be pending.")
-                    .send(Ok(response.0));
-            }
-        }
-    }
-
-    pub(in crate::network::event_loop) fn handle_request_response_outbound_failure(
-        &mut self,
-        request_id: request_response::OutboundRequestId,
-        error: request_response::OutboundFailure,
-    ) {
-        let _ = self
-            .pending_request_file
-            .remove(&request_id)
-            .expect("Request to still be pending.")
-            .send(Err(anyhow!(error)));
-    }
-
-    pub(in crate::network::event_loop) fn handle_direct_messaging_message(
-        &mut self,
-        message: request_response::Message<DirectMessage, DirectMessageResponse>,
+        message: request_response::Message<DirectMessage, NoResponse>,
         peer: PeerId,
     ) {
         match message {
             request_response::Message::Request {
                 request, channel, ..
             } => {
-                println!("You have received a direct message:");
-                match self.peer_id_username_map.get(&peer) {
-                    Some(username) => println!("From {username}: {}", request.0),
-                    None => println!("From {peer}: {}", request.0),
-                }
+                let username = self.get_username(&peer).await;
+                self.event_sender
+                    .send(Event::InboundDirectMessage {
+                        username,
+                        message: request.0,
+                    })
+                    .await
+                    .expect("Event sender not to be dropped");
 
                 self.swarm
                     .behaviour_mut()
                     .direct_messaging
-                    .send_response(channel, DirectMessageResponse())
+                    .send_response(channel, NoResponse())
                     .expect("The response to be sent");
             }
             request_response::Message::Response { request_id, .. } => {
-                println!("A direct messaging response has arrived");
                 let _ = self
                     .pending_request_message
                     .remove(&request_id)
@@ -172,50 +108,118 @@ impl EventLoop {
             .send(Err(anyhow!(error)));
     }
 
-    pub(in crate::network::event_loop) async fn handle_file_trade_message(
+    pub(in crate::network::event_loop) async fn handle_trade_offering_message(
         &mut self,
-        message: request_response::Message<TradeOffer, TradeResponse>,
+        message: request_response::Message<TradeOffer, NoResponse>,
         peer: PeerId,
     ) {
         match message {
             request_response::Message::Request {
                 request, channel, ..
             } => {
-                let username = self.peer_id_username_map.get(&peer).map(ToOwned::to_owned);
+                self.swarm
+                    .behaviour_mut()
+                    .trade_offering
+                    .send_response(channel, NoResponse())
+                    .expect("Connection to peer to still be open");
+
+                let username = self.get_username(&peer).await;
                 self.event_sender
                     .send(Event::InboundTradeOffer {
-                        offered_file: request.0,
+                        offered_file_name: request.offered_file_name,
                         username,
-                        requested_file: request.1,
-                        channel,
+                        requested_file_name: request.requested_file_name,
                     })
                     .await
                     .expect("Event receiver not to be dropped");
             }
-            request_response::Message::Response {
-                request_id,
-                response,
+            request_response::Message::Response { .. } => {}
+        }
+    }
+
+    #[allow(clippy::unused_self)]
+    pub(in crate::network::event_loop) fn handle_trade_offering_outbound_failure(
+        &mut self,
+        error: &request_response::OutboundFailure,
+    ) {
+        println!("A trade offer failure has occured: {error:?}");
+    }
+
+    pub(in crate::network::event_loop) async fn handle_trade_response_message(
+        &mut self,
+        message: request_response::Message<TradeResponse, TradeResponseResponse>,
+        peer: PeerId,
+    ) {
+        match message {
+            request_response::Message::Request {
+                request, channel, ..
             } => {
-                let _ = self
-                    .pending_request_trade
+                let offer = TradeOffer {
+                    requested_file_name: request.requested_file_name.clone(),
+                    offered_file_name: request.offered_file_name.clone(),
+                };
+                let entry = self.outgoing_trade_offers.remove(&(peer, offer));
+                let Some((offered_file_bytes, requested_file_path)) = entry else {
+                    println!("Received invalid trade response!");
+                    return;
+                };
+                let username = self.get_username(&peer).await;
+
+                self.event_sender
+                    .send(Event::InboundTradeResponse {
+                        username,
+                        offered_file_name: request.offered_file_name.clone(),
+                        requested_file_name: request.requested_file_name.clone(),
+                        was_accepted: request.requested_file_bytes.is_some(),
+                    })
+                    .await
+                    .expect("Event receiver not to be dropped");
+
+                let mut response: Option<Vec<u8>> = None;
+
+                if let Some(requested_file_bytes) = request.requested_file_bytes {
+                    tokio::fs::write(requested_file_path, requested_file_bytes)
+                        .await
+                        .expect("Failed to write to file system");
+                    response = Some(offered_file_bytes);
+                }
+
+                self.swarm
+                    .behaviour_mut()
+                    .trade_response
+                    .send_response(
+                        channel,
+                        TradeResponseResponse {
+                            offered_file_name: request.offered_file_name,
+                            requested_file_name: request.requested_file_name,
+                            offered_file_bytes: response,
+                        },
+                    )
+                    .expect("Connection to peer to still be open");
+            }
+            request_response::Message::Response {
+                response,
+                request_id,
+            } => {
+                let sender = self
+                    .pending_trade_response_response
                     .remove(&request_id)
-                    .expect("Request to still be pending.")
-                    .send(Ok(response.0));
+                    .expect("Trade response to still be pending");
+                let _ = sender.send(response.offered_file_bytes);
             }
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_file_trade_outbound_failure(
+    pub(in crate::network::event_loop) fn handle_trade_response_outbound_failure(
         &mut self,
         request_id: request_response::OutboundRequestId,
-        error: request_response::OutboundFailure,
+        error: &request_response::OutboundFailure,
     ) {
-        println!("A trade offer failure has occured: {error:?}");
-        let _ = self
-            .pending_request_trade
-            .remove(&request_id)
-            .expect("Message to still be pending.")
-            .send(Err(anyhow!(error)));
+        println!("A trade response failure has occured: {error:?}");
+        if let Some(sender) = self.pending_trade_response_response.remove(&request_id) {
+            // sender.send(Err(anyhow!(error)));
+            let _ = sender.send(None);
+        }
     }
 
     pub(in crate::network::event_loop) fn handle_connection_established(
@@ -271,18 +275,17 @@ impl EventLoop {
         }
     }
     #[allow(clippy::unused_self)]
-    pub(in crate::network::event_loop) fn handle_gossipsub_message(
+    pub(in crate::network::event_loop) async fn handle_gossipsub_message(
         &mut self,
         message: &gossipsub::Message,
         peer_id: &PeerId,
     ) {
-        let message = String::from_utf8_lossy(&message.data);
+        let message = String::from_utf8_lossy(&message.data).into_owned();
+        let username = self.get_username(peer_id).await;
 
-        println!("Received new global chat!");
-
-        match self.peer_id_username_map.get(peer_id) {
-            Some(username) => println!("From {username}: '{message}'"),
-            None => println!("From {peer_id}: '{message}'"),
-        }
+        self.event_sender
+            .send(Event::InboundChat { username, message })
+            .await
+            .expect("Event sender not to be dropped");
     }
 }

@@ -50,8 +50,8 @@ async fn main() -> Result<(), anyhow::Error> {
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
     loop {
         tokio::select! {
-            command = stdin.next_line() => handle_std_in(command, &mut network_client).await?,
-            event = network_events.next() => handle_network_event(event, &mut network_client).await,
+            command = stdin.next_line() => handle_std_in(command, &mut network_client).await,
+            event = network_events.next() => handle_network_event(event).await,
         }
     }
 }

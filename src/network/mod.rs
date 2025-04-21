@@ -22,32 +22,39 @@ pub(crate) use event_loop::{Event, EventLoop};
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
-    request_response: request_response::cbor::Behaviour<FileRequest, FileResponse>,
-    file_trading: request_response::cbor::Behaviour<TradeOffer, TradeResponse>,
-    direct_messaging: request_response::cbor::Behaviour<DirectMessage, DirectMessageResponse>,
+    trade_offering: request_response::cbor::Behaviour<TradeOffer, NoResponse>,
+    trade_response: request_response::cbor::Behaviour<TradeResponse, TradeResponseResponse>,
+    direct_messaging: request_response::cbor::Behaviour<DirectMessage, NoResponse>,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
 }
 
-// Simple file exchange protocol
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct FileRequest(String);
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
+pub(crate) struct TradeOffer {
+    offered_file_name: String,
+    requested_file_name: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct FileResponse(Vec<u8>);
+pub(crate) struct TradeResponse {
+    requested_file_name: String,
+    offered_file_name: String,
+    requested_file_bytes: Option<Vec<u8>>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct TradeOffer(String, String);
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct TradeResponse(Option<Vec<u8>>);
+pub(crate) struct TradeResponseResponse {
+    offered_file_name: String,
+    requested_file_name: String,
+    offered_file_bytes: Option<Vec<u8>>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct DirectMessage(String);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct DirectMessageResponse();
+pub(crate) struct NoResponse();
 
 /// Creates the network components, namely:
 ///
@@ -97,16 +104,13 @@ pub(crate) fn new(
                     peer_id,
                     kad::store::MemoryStore::new(keypair.public().to_peer_id()),
                 ),
-                request_response: request_response::cbor::Behaviour::new(
-                    [(
-                        StreamProtocol::new("/file-exchange/1"),
-                        ProtocolSupport::Full,
-                    )],
+                trade_offering: request_response::cbor::Behaviour::new(
+                    [(StreamProtocol::new("/trade-offer/1"), ProtocolSupport::Full)],
                     request_response::Config::default(),
                 ),
-                file_trading: request_response::cbor::Behaviour::new(
+                trade_response: request_response::cbor::Behaviour::new(
                     [(
-                        StreamProtocol::new("/file-trade/1"),
+                        StreamProtocol::new("/trade-response/1"),
                         ProtocolSupport::Full,
                     )],
                     request_response::Config::default(),

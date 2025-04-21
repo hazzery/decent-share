@@ -2,20 +2,19 @@ mod behaviour_handlers;
 mod command;
 mod command_handlers;
 
-use std::collections::{HashMap, HashSet};
+use std::{collections::HashMap, path::PathBuf};
 
 use futures::{
     channel::{mpsc, oneshot},
     StreamExt,
 };
 use libp2p::{
-    gossipsub, kad, mdns,
-    request_response::{self, OutboundRequestId, ResponseChannel},
+    gossipsub, kad, mdns, request_response,
     swarm::{Swarm, SwarmEvent},
     PeerId,
 };
 
-use super::{Behaviour, BehaviourEvent, DirectMessage, FileRequest, FileResponse, TradeResponse};
+use super::{Behaviour, BehaviourEvent, DirectMessage, TradeOffer, TradeResponse};
 
 pub(super) use command::Command;
 
@@ -27,12 +26,13 @@ pub(crate) struct EventLoop {
     event_sender: mpsc::Sender<Event>,
     peer_id_username_map: HashMap<PeerId, String>,
     pending_dial: HashMap<PeerId, oneshot::Sender<DynResult<()>>>,
-    pending_start_providing: HashMap<kad::QueryId, oneshot::Sender<()>>,
-    pending_get_providers: HashMap<kad::QueryId, oneshot::Sender<HashSet<PeerId>>>,
-    pending_request_file: HashMap<OutboundRequestId, oneshot::Sender<DynResult<Vec<u8>>>>,
-    pending_request_message: HashMap<OutboundRequestId, oneshot::Sender<DynResult<()>>>,
-    pending_request_trade: HashMap<OutboundRequestId, oneshot::Sender<DynResult<Option<Vec<u8>>>>>,
+    pending_request_message:
+        HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_name_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<PeerId>>>,
+    pending_username_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<String>>>,
+    pending_trade_response_response:
+        HashMap<request_response::OutboundRequestId, oneshot::Sender<Option<Vec<u8>>>>,
+    outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
     gossipsub_topic: gossipsub::IdentTopic,
 }
 
@@ -49,13 +49,31 @@ impl EventLoop {
             event_sender,
             peer_id_username_map: HashMap::default(),
             pending_dial: HashMap::default(),
-            pending_start_providing: HashMap::default(),
-            pending_get_providers: HashMap::default(),
-            pending_request_file: HashMap::default(),
             pending_request_message: HashMap::default(),
-            pending_request_trade: HashMap::default(),
             pending_name_request: HashMap::default(),
+            pending_username_request: HashMap::default(),
+            pending_trade_response_response: HashMap::default(),
+            outgoing_trade_offers: HashMap::default(),
             gossipsub_topic,
+        }
+    }
+
+    async fn get_username(&mut self, peer_id: &PeerId) -> Result<String, anyhow::Error> {
+        let username = self
+            .peer_id_username_map
+            .get(peer_id)
+            .map(ToOwned::to_owned);
+
+        if let Some(username) = username {
+            Ok(username)
+        } else {
+            let (sender, receiver) = oneshot::channel();
+
+            let key = kad::RecordKey::new(&peer_id.to_bytes());
+            let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
+            self.pending_username_request.insert(query_id, sender);
+
+            receiver.await?
         }
     }
 
@@ -77,22 +95,6 @@ impl EventLoop {
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
                     id,
-                    result: kad::QueryResult::StartProviding(_),
-                    ..
-                },
-            )) => self.handle_pending_start_providing(id),
-
-            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
-                kad::Event::OutboundQueryProgressed {
-                    id,
-                    result: kad::QueryResult::GetProviders(providers),
-                    ..
-                },
-            )) => self.handle_found_providers(id, providers),
-
-            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
-                kad::Event::OutboundQueryProgressed {
-                    id,
                     result: kad::QueryResult::GetRecord(record),
                     ..
                 },
@@ -105,19 +107,9 @@ impl EventLoop {
                 },
             )) => self.handle_put_record(record),
 
-            SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
-                request_response::Event::Message { message, .. },
-            )) => self.handle_request_response_message(message).await,
-
-            SwarmEvent::Behaviour(BehaviourEvent::RequestResponse(
-                request_response::Event::OutboundFailure {
-                    request_id, error, ..
-                },
-            )) => self.handle_request_response_outbound_failure(request_id, error),
-
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::Message { peer, message, .. },
-            )) => self.handle_direct_messaging_message(message, peer),
+            )) => self.handle_direct_messaging_message(message, peer).await,
 
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::OutboundFailure {
@@ -125,15 +117,23 @@ impl EventLoop {
                 },
             )) => self.handle_direct_messaging_outbound_failure(request_id, error),
 
-            SwarmEvent::Behaviour(BehaviourEvent::FileTrading(
+            SwarmEvent::Behaviour(BehaviourEvent::TradeOffering(
                 request_response::Event::Message { peer, message, .. },
-            )) => self.handle_file_trade_message(message, peer).await,
+            )) => self.handle_trade_offering_message(message, peer).await,
 
-            SwarmEvent::Behaviour(BehaviourEvent::FileTrading(
+            SwarmEvent::Behaviour(BehaviourEvent::TradeOffering(
+                request_response::Event::OutboundFailure { error, .. },
+            )) => self.handle_trade_offering_outbound_failure(&error),
+
+            SwarmEvent::Behaviour(BehaviourEvent::TradeResponse(
+                request_response::Event::Message { peer, message, .. },
+            )) => self.handle_trade_response_message(message, peer).await,
+
+            SwarmEvent::Behaviour(BehaviourEvent::TradeResponse(
                 request_response::Event::OutboundFailure {
                     request_id, error, ..
                 },
-            )) => self.handle_file_trade_outbound_failure(request_id, error),
+            )) => self.handle_trade_response_outbound_failure(request_id, &error),
 
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..
@@ -155,17 +155,17 @@ impl EventLoop {
                 propagation_source: peer_id,
                 message,
                 ..
-            })) => self.handle_gossipsub_message(&message, &peer_id),
+            })) => self.handle_gossipsub_message(&message, &peer_id).await,
 
-            SwarmEvent::Behaviour(BehaviourEvent::FileTrading(
+            SwarmEvent::Behaviour(BehaviourEvent::TradeOffering(
                 request_response::Event::InboundFailure { error, .. },
             )) => self.handle_file_trade_inbound_failure(error),
 
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)
-                | BehaviourEvent::RequestResponse(request_response::Event::ResponseSent { .. })
                 | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::FileTrading(request_response::Event::ResponseSent { .. })
+                | BehaviourEvent::TradeOffering(request_response::Event::ResponseSent { .. })
+                | BehaviourEvent::TradeResponse(request_response::Event::ResponseSent { .. })
                 | BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed { .. }),
             )
             | SwarmEvent::Dialing { .. }
@@ -175,21 +175,31 @@ impl EventLoop {
             | SwarmEvent::NewExternalAddrOfPeer { .. }
             | SwarmEvent::NewListenAddr { .. } => {}
 
-            e => panic!("{e:?}"),
+            event => println!("{event:?}"),
         }
     }
 }
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub(crate) enum Event {
-    InboundRequest {
-        request: String,
-        channel: ResponseChannel<FileResponse>,
-    },
     InboundTradeOffer {
-        offered_file: String,
-        username: Option<String>,
-        requested_file: String,
-        channel: ResponseChannel<TradeResponse>,
+        offered_file_name: String,
+        username: Result<String, anyhow::Error>,
+        requested_file_name: String,
+    },
+    InboundTradeResponse {
+        username: Result<String, anyhow::Error>,
+        offered_file_name: String,
+        requested_file_name: String,
+        was_accepted: bool,
+    },
+    InboundDirectMessage {
+        username: Result<String, anyhow::Error>,
+        message: String,
+    },
+    InboundChat {
+        username: Result<String, anyhow::Error>,
+        message: String,
     },
 }

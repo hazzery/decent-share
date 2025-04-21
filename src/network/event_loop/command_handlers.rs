@@ -1,28 +1,15 @@
-use std::collections::{hash_map, HashSet};
+use std::path::PathBuf;
 
-use anyhow::anyhow;
 use futures::channel::oneshot;
-use libp2p::{kad, multiaddr, request_response, Multiaddr, PeerId};
+use libp2p::{kad, request_response, PeerId};
 
+use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
 
-use super::{DirectMessage, EventLoop, FileRequest, FileResponse, TradeResponse};
-
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_start_listening(
-        &mut self,
-        address: Multiaddr,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
-    ) {
-        let _ = match self.swarm.listen_on(address) {
-            Ok(_) => sender.send(Ok(())),
-            Err(e) => sender.send(Err(anyhow!(e))),
-        };
-    }
-
-    pub(in crate::network::event_loop) fn handle_register_name(&mut self, username: String) {
+    pub(in crate::network::event_loop) fn handle_register_name(&mut self, username: &str) {
         let peer_id_bytes = self.swarm.local_peer_id().to_bytes();
-        let username_bytes = username.into_bytes();
+        let username_bytes = username.to_lowercase().into_bytes();
 
         let record = kad::Record {
             key: kad::RecordKey::new(&username_bytes),
@@ -51,10 +38,10 @@ impl EventLoop {
 
     pub(in crate::network::event_loop) fn handle_find_user(
         &mut self,
-        username: String,
+        username: &str,
         sender: oneshot::Sender<Result<PeerId, anyhow::Error>>,
     ) {
-        let key = kad::RecordKey::new(&username.into_bytes());
+        let key = kad::RecordKey::new(&username.to_lowercase().into_bytes());
         let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
         self.pending_name_request.insert(query_id, sender);
     }
@@ -62,108 +49,44 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_make_offer(
         &mut self,
         offered_file_name: String,
+        offered_file_bytes: Vec<u8>,
         peer_id: PeerId,
         requested_file_name: String,
-        sender: oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>,
+        requested_file_path: PathBuf,
     ) {
-        let request_id = self
-            .swarm
+        let offer = TradeOffer {
+            offered_file_name,
+            requested_file_name,
+        };
+        self.swarm
             .behaviour_mut()
-            .file_trading
-            .send_request(&peer_id, TradeOffer(offered_file_name, requested_file_name));
-        self.pending_request_trade.insert(request_id, sender);
+            .trade_offering
+            .send_request(&peer_id, offer.clone());
+
+        self.outgoing_trade_offers
+            .insert((peer_id, offer), (offered_file_bytes, requested_file_path));
     }
 
     pub(in crate::network::event_loop) fn handle_respond_trade(
         &mut self,
-        response: Option<Vec<u8>>,
-        channel: request_response::ResponseChannel<TradeResponse>,
-    ) {
-        self.swarm
-            .behaviour_mut()
-            .file_trading
-            .send_response(channel, TradeResponse(response))
-            .expect("Connection to peer to still be open");
-    }
-
-    pub(in crate::network::event_loop) fn handle_dial(
-        &mut self,
         peer_id: PeerId,
-        peer_addr: Multiaddr,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
+        requested_file_name: String,
+        offered_file_name: String,
+        requested_file_bytes: Option<Vec<u8>>,
+        sender: Option<oneshot::Sender<Option<Vec<u8>>>>,
     ) {
-        if let hash_map::Entry::Vacant(e) = self.pending_dial.entry(peer_id) {
-            self.swarm
-                .behaviour_mut()
-                .kademlia
-                .add_address(&peer_id, peer_addr.clone());
-            match self
-                .swarm
-                .dial(peer_addr.with(multiaddr::Protocol::P2p(peer_id)))
-            {
-                Ok(()) => {
-                    e.insert(sender);
-                }
-                Err(e) => {
-                    let _ = sender.send(Err(anyhow!(e)));
-                }
-            }
-        } else {
-            todo!("Already dialing peer.");
+        let request_id = self.swarm.behaviour_mut().trade_response.send_request(
+            &peer_id,
+            TradeResponse {
+                requested_file_name,
+                offered_file_name,
+                requested_file_bytes,
+            },
+        );
+        if let Some(sender) = sender {
+            self.pending_trade_response_response
+                .insert(request_id, sender);
         }
-    }
-
-    pub(in crate::network::event_loop) fn handle_start_providing(
-        &mut self,
-        file_name: String,
-        sender: oneshot::Sender<()>,
-    ) {
-        let query_id = self
-            .swarm
-            .behaviour_mut()
-            .kademlia
-            .start_providing(file_name.into_bytes().into())
-            .expect("No store error.");
-        self.pending_start_providing.insert(query_id, sender);
-    }
-
-    pub(in crate::network::event_loop) fn handle_get_providers(
-        &mut self,
-        file_name: String,
-        sender: oneshot::Sender<HashSet<PeerId>>,
-    ) {
-        let query_id = self
-            .swarm
-            .behaviour_mut()
-            .kademlia
-            .get_providers(file_name.into_bytes().into());
-        self.pending_get_providers.insert(query_id, sender);
-    }
-
-    pub(in crate::network::event_loop) fn handle_request_file(
-        &mut self,
-        file_name: String,
-        peer: PeerId,
-        sender: oneshot::Sender<Result<Vec<u8>, anyhow::Error>>,
-    ) {
-        let request_id = self
-            .swarm
-            .behaviour_mut()
-            .request_response
-            .send_request(&peer, FileRequest(file_name));
-        self.pending_request_file.insert(request_id, sender);
-    }
-
-    pub(in crate::network::event_loop) fn handle_respond_file(
-        &mut self,
-        file: Vec<u8>,
-        channel: request_response::ResponseChannel<FileResponse>,
-    ) {
-        self.swarm
-            .behaviour_mut()
-            .request_response
-            .send_response(channel, FileResponse(file))
-            .expect("Connection to peer to be still open.");
     }
 
     pub(in crate::network::event_loop) fn handle_send_message(&mut self, message: &str) {
@@ -187,7 +110,7 @@ impl EventLoop {
             .send_request(peer_id, DirectMessage(message));
         self.pending_request_message.insert(request_id, sender);
     }
-
+    #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_file_trade_inbound_failure(
         &mut self,
         error: request_response::InboundFailure,
