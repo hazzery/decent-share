@@ -12,7 +12,11 @@ pub(crate) enum Command {
     },
     FindUser {
         username: String,
-        sender: oneshot::Sender<Result<PeerId, anyhow::Error>>,
+        sender: oneshot::Sender<Option<PeerId>>,
+    },
+    FindPeerUsername {
+        peer_id: PeerId,
+        username_sender: oneshot::Sender<Result<String, anyhow::Error>>,
     },
     MakeOffer {
         offered_file_name: String,
@@ -43,6 +47,10 @@ impl EventLoop {
         match command {
             Command::RegisterName { username } => self.handle_register_name(&username),
             Command::FindUser { username, sender } => self.handle_find_user(&username, sender),
+            Command::FindPeerUsername {
+                peer_id,
+                username_sender,
+            } => self.handle_find_peer_username(peer_id, username_sender),
             Command::MakeOffer {
                 offered_file_name,
                 offered_file_bytes,

@@ -51,7 +51,7 @@ async fn main() -> Result<(), anyhow::Error> {
     loop {
         tokio::select! {
             command = stdin.next_line() => handle_std_in(command, &mut network_client).await,
-            event = network_events.next() => handle_network_event(event).await,
+            event = network_events.next() => handle_network_event(event, &mut network_client).await,
         }
     }
 }

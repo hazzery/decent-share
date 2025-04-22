@@ -23,9 +23,9 @@ impl EventLoop {
                 ..
             })) => {
                 if let Some(sender) = self.pending_name_request.remove(&query_id) {
-                    let peer_id = PeerId::from_bytes(&value).map_err(|error| anyhow!(error));
+                    let peer_id = PeerId::from_bytes(&value).ok();
 
-                    if let Ok(peer_id) = peer_id {
+                    if let Some(peer_id) = peer_id {
                         if let Ok(username) = String::from_utf8(key.to_vec()) {
                             self.peer_id_username_map.insert(peer_id, username);
                         }
@@ -45,7 +45,11 @@ impl EventLoop {
                 }
             }
             Ok(_) => {}
-            Err(error) => eprintln!("Failed to get record: {error:?}"),
+            Err(_) => {
+                if let Some(sender) = self.pending_name_request.remove(&query_id) {
+                    let _ = sender.send(None);
+                }
+            }
         }
     }
 
@@ -63,16 +67,15 @@ impl EventLoop {
     pub(in crate::network::event_loop) async fn handle_direct_messaging_message(
         &mut self,
         message: request_response::Message<DirectMessage, NoResponse>,
-        peer: PeerId,
+        peer_id: PeerId,
     ) {
         match message {
             request_response::Message::Request {
                 request, channel, ..
             } => {
-                let username = self.get_username(&peer);
                 self.event_sender
                     .send(Event::InboundDirectMessage {
-                        username,
+                        peer_id,
                         message: request.0,
                     })
                     .await
@@ -110,7 +113,7 @@ impl EventLoop {
     pub(in crate::network::event_loop) async fn handle_trade_offering_message(
         &mut self,
         message: request_response::Message<TradeOffer, NoResponse>,
-        peer: PeerId,
+        peer_id: PeerId,
     ) {
         match message {
             request_response::Message::Request {
@@ -122,11 +125,12 @@ impl EventLoop {
                     .send_response(channel, NoResponse())
                     .expect("Connection to peer to still be open");
 
-                let username = self.get_username(&peer);
+                self.inbound_trade_offers.insert((peer_id, request.clone()));
+
                 self.event_sender
                     .send(Event::InboundTradeOffer {
                         offered_file_name: request.offered_file_name,
-                        username,
+                        peer_id,
                         requested_file_name: request.requested_file_name,
                     })
                     .await
@@ -147,7 +151,7 @@ impl EventLoop {
     pub(in crate::network::event_loop) async fn handle_trade_response_message(
         &mut self,
         message: request_response::Message<TradeResponse, TradeResponseResponse>,
-        peer: PeerId,
+        peer_id: PeerId,
     ) {
         match message {
             request_response::Message::Request {
@@ -157,16 +161,15 @@ impl EventLoop {
                     requested_file_name: request.requested_file_name.clone(),
                     offered_file_name: request.offered_file_name.clone(),
                 };
-                let entry = self.outgoing_trade_offers.remove(&(peer, offer));
+                let entry = self.outgoing_trade_offers.remove(&(peer_id, offer));
                 let Some((offered_file_bytes, requested_file_path)) = entry else {
                     println!("Received invalid trade response!");
                     return;
                 };
-                let username = self.get_username(&peer);
 
                 self.event_sender
                     .send(Event::InboundTradeResponse {
-                        username,
+                        peer_id,
                         offered_file_name: request.offered_file_name.clone(),
                         requested_file_name: request.requested_file_name.clone(),
                         was_accepted: request.requested_file_bytes.is_some(),
@@ -280,13 +283,11 @@ impl EventLoop {
     pub(in crate::network::event_loop) async fn handle_gossipsub_message(
         &mut self,
         message: &gossipsub::Message,
-        peer_id: &PeerId,
+        peer_id: PeerId,
     ) {
         let message = String::from_utf8_lossy(&message.data).into_owned();
-        let username = self.get_username(peer_id);
-
         self.event_sender
-            .send(Event::InboundChat { username, message })
+            .send(Event::InboundChat { peer_id, message })
             .await
             .expect("Event sender not to be dropped");
     }

@@ -2,9 +2,11 @@ mod behaviour_handlers;
 mod command;
 mod command_handlers;
 
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
-use anyhow::bail;
 use futures::{
     channel::{mpsc, oneshot},
     StreamExt,
@@ -29,13 +31,12 @@ pub(crate) struct EventLoop {
     pending_dial: HashMap<PeerId, oneshot::Sender<DynResult<()>>>,
     pending_request_message:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
-    pending_name_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<PeerId>>>,
+    pending_name_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
     pending_username_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<String>>>,
-    pending_trade_response_response: HashMap<
-        request_response::OutboundRequestId,
-        oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>,
-    >,
+    pending_trade_response_response:
+        HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<Option<Vec<u8>>>>>,
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
+    inbound_trade_offers: HashSet<(PeerId, TradeOffer)>,
     gossipsub_topic: gossipsub::IdentTopic,
 }
 
@@ -57,27 +58,8 @@ impl EventLoop {
             pending_username_request: HashMap::default(),
             pending_trade_response_response: HashMap::default(),
             outgoing_trade_offers: HashMap::default(),
+            inbound_trade_offers: HashSet::default(),
             gossipsub_topic,
-        }
-    }
-
-    fn get_username(&mut self, peer_id: &PeerId) -> Result<String, anyhow::Error> {
-        let username = self
-            .peer_id_username_map
-            .get(peer_id)
-            .map(ToOwned::to_owned);
-
-        if let Some(username) = username {
-            Ok(username)
-        } else {
-            // let (sender, receiver) = oneshot::channel();
-            //
-            // let key = kad::RecordKey::new(&peer_id.to_bytes());
-            // let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
-            // self.pending_username_request.insert(query_id, sender);
-            //
-            // receiver.await?
-            bail!("peer_id was not cached");
         }
     }
 
@@ -159,11 +141,7 @@ impl EventLoop {
                 propagation_source: peer_id,
                 message,
                 ..
-            })) => self.handle_gossipsub_message(&message, &peer_id).await,
-
-            SwarmEvent::Behaviour(BehaviourEvent::TradeOffering(
-                request_response::Event::InboundFailure { error, .. },
-            )) => self.handle_file_trade_inbound_failure(error),
+            })) => self.handle_gossipsub_message(&message, peer_id).await,
 
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)
@@ -189,21 +167,21 @@ impl EventLoop {
 pub(crate) enum Event {
     InboundTradeOffer {
         offered_file_name: String,
-        username: Result<String, anyhow::Error>,
+        peer_id: PeerId,
         requested_file_name: String,
     },
     InboundTradeResponse {
-        username: Result<String, anyhow::Error>,
+        peer_id: PeerId,
         offered_file_name: String,
         requested_file_name: String,
         was_accepted: bool,
     },
     InboundDirectMessage {
-        username: Result<String, anyhow::Error>,
+        peer_id: PeerId,
         message: String,
     },
     InboundChat {
-        username: Result<String, anyhow::Error>,
+        peer_id: PeerId,
         message: String,
     },
 }

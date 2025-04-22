@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
+use anyhow::anyhow;
 use futures::channel::oneshot;
-use libp2p::{kad, request_response, PeerId};
+use libp2p::{kad, PeerId};
 
 use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
@@ -39,11 +40,22 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_find_user(
         &mut self,
         username: &str,
-        sender: oneshot::Sender<Result<PeerId, anyhow::Error>>,
+        sender: oneshot::Sender<Option<PeerId>>,
     ) {
         let key = kad::RecordKey::new(&username.to_lowercase().into_bytes());
         let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
         self.pending_name_request.insert(query_id, sender);
+    }
+
+    pub(in crate::network::event_loop) fn handle_find_peer_username(
+        &mut self,
+        peer_id: PeerId,
+        username_sender: oneshot::Sender<Result<String, anyhow::Error>>,
+    ) {
+        let key = kad::RecordKey::new(&peer_id.to_bytes());
+        let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
+        self.pending_username_request
+            .insert(query_id, username_sender);
     }
 
     pub(in crate::network::event_loop) fn handle_make_offer(
@@ -75,6 +87,20 @@ impl EventLoop {
         requested_file_bytes: Option<Vec<u8>>,
         offered_bytes_sender: Option<oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>>,
     ) {
+        if self.inbound_trade_offers.remove(&(
+            peer_id,
+            TradeOffer {
+                requested_file_name: requested_file_name.clone(),
+                offered_file_name: offered_file_name.clone(),
+            },
+        )) {
+            if let Some(offered_bytes_sender) = offered_bytes_sender {
+                let _ = offered_bytes_sender.send(Err(anyhow!(format!(
+                    "No valid trade with this user for {offered_file_name} and {requested_file_name}"
+                ))));
+            }
+            return;
+        }
         let request_id = self.swarm.behaviour_mut().trade_response.send_request(
             &peer_id,
             TradeResponse {
@@ -109,12 +135,5 @@ impl EventLoop {
             .direct_messaging
             .send_request(peer_id, DirectMessage(message));
         self.pending_request_message.insert(request_id, sender);
-    }
-    #[allow(clippy::unused_self)]
-    pub(in crate::network::event_loop) fn handle_file_trade_inbound_failure(
-        &mut self,
-        error: request_response::InboundFailure,
-    ) {
-        println!("{error:?}");
     }
 }

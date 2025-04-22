@@ -1,5 +1,6 @@
 mod client;
 mod event_loop;
+mod username_store;
 
 use std::{
     hash::{DefaultHasher, Hash, Hasher},
@@ -153,7 +154,7 @@ pub(crate) fn new(
     Ok((
         Client {
             sender: command_sender,
-            username_peer_id_map: Arc::default(),
+            username_store: Arc::default(),
         },
         event_receiver,
         EventLoop::new(swarm, command_receiver, event_sender, topic),

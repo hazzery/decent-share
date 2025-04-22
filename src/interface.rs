@@ -80,9 +80,9 @@ pub(crate) async fn handle_std_in(
                 println!("Missing username");
                 return;
             };
-            match network_client.find_user(username.clone()).await {
-                Ok(_peer_id) => println!("Found Peer ID of {username}!"),
-                Err(error) => eprintln!("Error finding user: {error:?}"),
+            match network_client.get_peer_id(username.clone()).await {
+                Some(_peer_id) => println!("Found Peer ID of {username}!"),
+                None => eprintln!("No user with username {username} exists"),
             }
         }
         "dm" => {
@@ -169,7 +169,7 @@ pub(crate) async fn handle_std_in(
     }
 }
 
-pub async fn handle_network_event(event: Option<Event>) {
+pub async fn handle_network_event(event: Option<Event>, network_client: &mut Client) {
     let Some(event) = event else {
         println!("Received empty network event");
         return;
@@ -178,24 +178,24 @@ pub async fn handle_network_event(event: Option<Event>) {
     match event {
         Event::InboundTradeOffer {
             offered_file_name: offered_file,
-            username,
+            peer_id,
             requested_file_name: requested_file,
         } => {
             println!("You have received a trade offer!",);
-            match username {
+            match network_client.get_username(peer_id).await {
                 Ok(username) => println!("From: {username}"),
                 Err(error) => println!("Error fetching username: {error:?}"),
             }
             println!("Receive: {offered_file}, Provide: {requested_file}");
         }
         Event::InboundTradeResponse {
-            username,
+            peer_id,
             offered_file_name: offered_file,
             requested_file_name: requested_file,
             was_accepted,
         } => {
             let response_message = if was_accepted { "accepted" } else { "declined" };
-            let username = match username {
+            let username = match network_client.get_username(peer_id).await {
                 Ok(username) => username,
                 Err(error) => error.to_string(),
             };
@@ -204,17 +204,17 @@ pub async fn handle_network_event(event: Option<Event>) {
                 println!("{requested_file} is now available at the path you specified");
             }
         }
-        Event::InboundDirectMessage { username, message } => {
+        Event::InboundDirectMessage { peer_id, message } => {
             println!("You have received a direct message!");
-            match username {
+            match network_client.get_username(peer_id).await {
                 Ok(username) => println!("From {username}:"),
                 Err(error) => println!("Error fetching username: {error:?}"),
             }
             println!("{message}");
         }
-        Event::InboundChat { username, message } => {
+        Event::InboundChat { peer_id, message } => {
             println!("Received new global chat!");
-            match username {
+            match network_client.get_username(peer_id).await {
                 Ok(username) => println!("From {username}:"),
                 Err(error) => println!("Error fetching username: {error:?}"),
             }

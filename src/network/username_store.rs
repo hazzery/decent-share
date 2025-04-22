@@ -9,14 +9,6 @@ pub(super) struct UsernameStore {
 }
 
 impl UsernameStore {
-    pub fn contains_username(&self, username: &str) -> bool {
-        self.username_peer_id_map.contains_key(username)
-    }
-
-    pub fn contains_peer_id(&self, peer_id: &PeerId) -> bool {
-        self.peer_id_username_map.contains_key(peer_id)
-    }
-
     pub fn get_username(&self, peer_id: &PeerId) -> Option<&String> {
         self.peer_id_username_map.get(peer_id)
     }
