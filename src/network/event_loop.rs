@@ -4,6 +4,7 @@ mod command_handlers;
 
 use std::{collections::HashMap, path::PathBuf};
 
+use anyhow::bail;
 use futures::{
     channel::{mpsc, oneshot},
     StreamExt,
@@ -30,8 +31,10 @@ pub(crate) struct EventLoop {
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_name_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<PeerId>>>,
     pending_username_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<String>>>,
-    pending_trade_response_response:
-        HashMap<request_response::OutboundRequestId, oneshot::Sender<Option<Vec<u8>>>>,
+    pending_trade_response_response: HashMap<
+        request_response::OutboundRequestId,
+        oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>,
+    >,
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
     gossipsub_topic: gossipsub::IdentTopic,
 }
@@ -58,7 +61,7 @@ impl EventLoop {
         }
     }
 
-    async fn get_username(&mut self, peer_id: &PeerId) -> Result<String, anyhow::Error> {
+    fn get_username(&mut self, peer_id: &PeerId) -> Result<String, anyhow::Error> {
         let username = self
             .peer_id_username_map
             .get(peer_id)
@@ -67,13 +70,14 @@ impl EventLoop {
         if let Some(username) = username {
             Ok(username)
         } else {
-            let (sender, receiver) = oneshot::channel();
-
-            let key = kad::RecordKey::new(&peer_id.to_bytes());
-            let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
-            self.pending_username_request.insert(query_id, sender);
-
-            receiver.await?
+            // let (sender, receiver) = oneshot::channel();
+            //
+            // let key = kad::RecordKey::new(&peer_id.to_bytes());
+            // let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
+            // self.pending_username_request.insert(query_id, sender);
+            //
+            // receiver.await?
+            bail!("peer_id was not cached");
         }
     }
 
@@ -133,7 +137,7 @@ impl EventLoop {
                 request_response::Event::OutboundFailure {
                     request_id, error, ..
                 },
-            )) => self.handle_trade_response_outbound_failure(request_id, &error),
+            )) => self.handle_trade_response_outbound_failure(request_id, error),
 
             SwarmEvent::ConnectionEstablished {
                 peer_id, endpoint, ..

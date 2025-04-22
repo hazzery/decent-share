@@ -73,7 +73,7 @@ impl EventLoop {
         requested_file_name: String,
         offered_file_name: String,
         requested_file_bytes: Option<Vec<u8>>,
-        sender: Option<oneshot::Sender<Option<Vec<u8>>>>,
+        offered_bytes_sender: Option<oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>>,
     ) {
         let request_id = self.swarm.behaviour_mut().trade_response.send_request(
             &peer_id,
@@ -83,9 +83,9 @@ impl EventLoop {
                 requested_file_bytes,
             },
         );
-        if let Some(sender) = sender {
+        if let Some(offered_bytes_sender) = offered_bytes_sender {
             self.pending_trade_response_response
-                .insert(request_id, sender);
+                .insert(request_id, offered_bytes_sender);
         }
     }
 

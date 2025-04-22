@@ -7,9 +7,8 @@ use libp2p::{
 };
 use std::borrow::ToOwned;
 
-use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
-
 use super::{Event, EventLoop};
+use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
 impl EventLoop {
     #[allow(clippy::unused_self)]
@@ -70,7 +69,7 @@ impl EventLoop {
             request_response::Message::Request {
                 request, channel, ..
             } => {
-                let username = self.get_username(&peer).await;
+                let username = self.get_username(&peer);
                 self.event_sender
                     .send(Event::InboundDirectMessage {
                         username,
@@ -123,7 +122,7 @@ impl EventLoop {
                     .send_response(channel, NoResponse())
                     .expect("Connection to peer to still be open");
 
-                let username = self.get_username(&peer).await;
+                let username = self.get_username(&peer);
                 self.event_sender
                     .send(Event::InboundTradeOffer {
                         offered_file_name: request.offered_file_name,
@@ -163,7 +162,7 @@ impl EventLoop {
                     println!("Received invalid trade response!");
                     return;
                 };
-                let username = self.get_username(&peer).await;
+                let username = self.get_username(&peer);
 
                 self.event_sender
                     .send(Event::InboundTradeResponse {
@@ -178,6 +177,9 @@ impl EventLoop {
                 let mut response: Option<Vec<u8>> = None;
 
                 if let Some(requested_file_bytes) = request.requested_file_bytes {
+                    tokio::fs::create_dir_all(requested_file_path.clone())
+                        .await
+                        .expect("Failed to create parent directories");
                     tokio::fs::write(requested_file_path, requested_file_bytes)
                         .await
                         .expect("Failed to write to file system");
@@ -201,11 +203,11 @@ impl EventLoop {
                 response,
                 request_id,
             } => {
-                let sender = self
+                let offered_bytes_sender = self
                     .pending_trade_response_response
                     .remove(&request_id)
                     .expect("Trade response to still be pending");
-                let _ = sender.send(response.offered_file_bytes);
+                let _ = offered_bytes_sender.send(Ok(response.offered_file_bytes));
             }
         }
     }
@@ -213,12 +215,12 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_trade_response_outbound_failure(
         &mut self,
         request_id: request_response::OutboundRequestId,
-        error: &request_response::OutboundFailure,
+        error: request_response::OutboundFailure,
     ) {
         println!("A trade response failure has occured: {error:?}");
-        if let Some(sender) = self.pending_trade_response_response.remove(&request_id) {
-            // sender.send(Err(anyhow!(error)));
-            let _ = sender.send(None);
+        if let Some(offered_bytes_sender) = self.pending_trade_response_response.remove(&request_id)
+        {
+            let _ = offered_bytes_sender.send(Err(anyhow::Error::from(error)));
         }
     }
 
@@ -281,7 +283,7 @@ impl EventLoop {
         peer_id: &PeerId,
     ) {
         let message = String::from_utf8_lossy(&message.data).into_owned();
-        let username = self.get_username(peer_id).await;
+        let username = self.get_username(peer_id);
 
         self.event_sender
             .send(Event::InboundChat { username, message })

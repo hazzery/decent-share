@@ -26,7 +26,7 @@ pub(crate) enum Command {
         requested_file_name: String,
         offered_file_name: String,
         requested_file_bytes: Option<Vec<u8>>,
-        offered_bytes_sender: Option<oneshot::Sender<Option<Vec<u8>>>>,
+        offered_bytes_sender: Option<oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>>,
     },
     SendMessage {
         message: String,
@@ -61,13 +61,13 @@ impl EventLoop {
                 requested_file_name,
                 offered_file_name,
                 requested_file_bytes,
-                offered_bytes_sender: sender,
+                offered_bytes_sender,
             } => self.handle_respond_trade(
                 peer_id,
                 requested_file_name,
                 offered_file_name,
                 requested_file_bytes,
-                sender,
+                offered_bytes_sender,
             ),
             Command::SendMessage { message } => self.handle_send_message(&message),
             Command::DirectMessage {

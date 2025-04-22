@@ -126,11 +126,11 @@ pub(crate) async fn handle_std_in(
                 return;
             };
             if let Err(error) = handle_accept_trade(
-                username.to_string(),
-                requested_file_name.to_string(),
-                requested_file_path,
-                offered_file_name.to_string(),
+                username,
+                offered_file_name,
                 offered_file_path,
+                requested_file_name,
+                requested_file_path,
                 network_client,
             )
             .await
@@ -199,8 +199,10 @@ pub async fn handle_network_event(event: Option<Event>) {
                 Ok(username) => username,
                 Err(error) => error.to_string(),
             };
-            print!("{username} has {response_message} your trade for {offered_file}.");
-            println!("{requested_file} is now available at the path you specified");
+            println!("{username} has {response_message} your trade for {offered_file}.");
+            if was_accepted {
+                println!("{requested_file} is now available at the path you specified");
+            }
         }
         Event::InboundDirectMessage { username, message } => {
             println!("You have received a direct message!");

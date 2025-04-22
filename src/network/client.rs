@@ -83,8 +83,9 @@ impl Client {
             .expect("Command receiver not to be dropped");
 
         match receiver.await.expect("Sender not to be dropped") {
-            Some(bytes) => Ok(bytes),
-            None => Err(anyhow!("No bytes were received!")),
+            Ok(Some(bytes)) => Ok(bytes),
+            Ok(None) => Err(anyhow!("No bytes were received!")),
+            Err(error) => Err(error),
         }
     }
 
