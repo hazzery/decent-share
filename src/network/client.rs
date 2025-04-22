@@ -62,6 +62,8 @@ impl Client {
             bail!("'{recipient_username}' is not a registered user");
         };
 
+        let (error_sender, error_receiver) = oneshot::channel();
+
         self.sender
             .send(Command::MakeOffer {
                 offered_file_name,
@@ -69,11 +71,12 @@ impl Client {
                 peer_id,
                 requested_file_name,
                 requested_file_path,
+                error_sender,
             })
             .await
             .expect("Command receiver not to be dropped.");
 
-        Ok(())
+        error_receiver.await.expect("Error sender was dropped")
     }
 
     pub(crate) async fn accept_trade(

@@ -24,6 +24,7 @@ pub(crate) enum Command {
         peer_id: PeerId,
         requested_file_name: String,
         requested_file_path: PathBuf,
+        error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     },
     RespondTrade {
         peer_id: PeerId,
@@ -57,12 +58,14 @@ impl EventLoop {
                 peer_id,
                 requested_file_name,
                 requested_file_path,
+                error_sender,
             } => self.handle_make_offer(
                 offered_file_name,
                 offered_file_bytes,
                 peer_id,
                 requested_file_name,
                 requested_file_path,
+                error_sender,
             ),
             Command::RespondTrade {
                 peer_id,

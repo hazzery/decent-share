@@ -18,11 +18,11 @@ pub(crate) async fn handle_trade(
 ) -> Result<(), anyhow::Error> {
     let offered_file_path = PathBuf::from_str(offered_file_path_string)?;
     if !offered_file_path.is_file() {
-        bail!("{offered_file_path_string} does not point to a file!");
+        bail!("'{offered_file_path_string}' does not point to a file!");
     }
     let requested_file_path = PathBuf::from_str(requested_file_path_string)?;
     if requested_file_path.exists() {
-        bail!("A file already exists at {requested_file_path_string}! Please provide a path to write the file to");
+        bail!("A file already exists at '{requested_file_path_string}'!\nPlease provide an empty path to write the requested file to");
     }
 
     let offered_file_bytes = tokio::fs::read(offered_file_path).await?;
@@ -45,17 +45,17 @@ pub(crate) async fn handle_accept_trade(
     offered_file_name: &str,
     offered_file_path_string: &str,
     requested_file_name: &str,
-    requested_file_path: &str,
+    requested_file_path_string: &str,
     network_client: &mut Client,
 ) -> Result<(), anyhow::Error> {
-    let requested_file_path = PathBuf::from_str(requested_file_path)?;
+    let requested_file_path = PathBuf::from_str(requested_file_path_string)?;
     if !requested_file_path.is_file() {
-        bail!("Path to requested file ({requested_file_path:?}) does not point to a file!");
+        bail!("'{requested_file_path_string}' does not point to a file!");
     }
 
     let offered_file_path = PathBuf::from_str(offered_file_path_string)?;
     if offered_file_path.exists() {
-        bail!("Path to place offered file ({offered_file_path:?}) already exists!");
+        bail!("A file already exists at '{offered_file_path_string}'! Please provide an empty path to write the offered file to");
     }
 
     let requested_file_bytes = tokio::fs::read(requested_file_path).await?;
@@ -71,11 +71,11 @@ pub(crate) async fn handle_accept_trade(
     if let Some(parent_directory) = offered_file_path.parent() {
         tokio::fs::create_dir_all(parent_directory)
             .await
-            .expect("failed to create parent directories");
+            .expect("Failed to create parent directories");
     }
     tokio::fs::write(offered_file_path, offered_file_bytes).await?;
     println!(
-        "{username}'s {offered_file_name} file is now available at {offered_file_path_string}"
+        "{username}'s '{offered_file_name}' file is now available at '{offered_file_path_string}'"
     );
 
     Ok(())

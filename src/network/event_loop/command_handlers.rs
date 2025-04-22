@@ -65,7 +65,14 @@ impl EventLoop {
         peer_id: PeerId,
         requested_file_name: String,
         requested_file_path: PathBuf,
+        error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
+        if &peer_id == self.swarm.local_peer_id() {
+            error_sender
+                .send(Err(anyhow!("May not send trade to yourself")))
+                .expect("Error receiver was dropped");
+            return;
+        }
         let offer = TradeOffer {
             offered_file_name,
             requested_file_name,
@@ -77,6 +84,10 @@ impl EventLoop {
 
         self.outgoing_trade_offers
             .insert((peer_id, offer), (offered_file_bytes, requested_file_path));
+
+        error_sender
+            .send(Ok(()))
+            .expect("Error receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_respond_trade(
