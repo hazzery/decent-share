@@ -68,6 +68,11 @@ pub(crate) async fn handle_accept_trade(
         )
         .await?;
 
+    if let Some(parent_directory) = offered_file_path.parent() {
+        tokio::fs::create_dir_all(parent_directory)
+            .await
+            .expect("failed to create parent directories");
+    }
     tokio::fs::write(offered_file_path, offered_file_bytes).await?;
     println!(
         "{username}'s {offered_file_name} file is now available at {offered_file_path_string}"

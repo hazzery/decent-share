@@ -180,9 +180,11 @@ impl EventLoop {
                 let mut response: Option<Vec<u8>> = None;
 
                 if let Some(requested_file_bytes) = request.requested_file_bytes {
-                    tokio::fs::create_dir_all(requested_file_path.clone())
-                        .await
-                        .expect("Failed to create parent directories");
+                    if let Some(parent_directory) = requested_file_path.parent() {
+                        tokio::fs::create_dir_all(parent_directory)
+                            .await
+                            .expect("Failed to create parent directories");
+                    }
                     tokio::fs::write(requested_file_path, requested_file_bytes)
                         .await
                         .expect("Failed to write to file system");

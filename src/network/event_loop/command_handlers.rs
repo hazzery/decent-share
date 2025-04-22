@@ -87,13 +87,11 @@ impl EventLoop {
         requested_file_bytes: Option<Vec<u8>>,
         offered_bytes_sender: Option<oneshot::Sender<Result<Option<Vec<u8>>, anyhow::Error>>>,
     ) {
-        if self.inbound_trade_offers.remove(&(
-            peer_id,
-            TradeOffer {
-                requested_file_name: requested_file_name.clone(),
-                offered_file_name: offered_file_name.clone(),
-            },
-        )) {
+        let offer = TradeOffer {
+            requested_file_name: requested_file_name.clone(),
+            offered_file_name: offered_file_name.clone(),
+        };
+        if !self.inbound_trade_offers.remove(&(peer_id, offer)) {
             if let Some(offered_bytes_sender) = offered_bytes_sender {
                 let _ = offered_bytes_sender.send(Err(anyhow!(format!(
                     "No valid trade with this user for {offered_file_name} and {requested_file_name}"
