@@ -81,16 +81,6 @@ pub(crate) async fn handle_std_in(
 
             network_client.register_username(username.clone()).await;
         }
-        "find" => {
-            let Some(username) = arguments.get(1) else {
-                println!("Missing username");
-                return;
-            };
-            match network_client.get_peer_id(username.clone()).await {
-                Some(_peer_id) => println!("Found Peer ID of {username}!"),
-                None => eprintln!("No user with username {username} exists"),
-            }
-        }
         "dm" => {
             let Some(username) = arguments.get(1) else {
                 println!("{DM_USAGE}");
