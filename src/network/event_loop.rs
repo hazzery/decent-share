@@ -9,7 +9,7 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    StreamExt,
+    SinkExt, StreamExt,
 };
 use libp2p::{
     gossipsub, kad, mdns, request_response,
@@ -36,6 +36,8 @@ pub(crate) struct EventLoop {
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
     inbound_trade_offers: HashSet<(PeerId, TradeOffer)>,
     gossipsub_topic: gossipsub::IdentTopic,
+    peer_counter: u8,
+    username: String,
 }
 
 impl EventLoop {
@@ -44,6 +46,7 @@ impl EventLoop {
         command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
         gossipsub_topic: gossipsub::IdentTopic,
+        username: String,
     ) -> Self {
         Self {
             swarm,
@@ -56,6 +59,8 @@ impl EventLoop {
             outgoing_trade_offers: HashMap::default(),
             inbound_trade_offers: HashSet::default(),
             gossipsub_topic,
+            peer_counter: 0,
+            username,
         }
     }
 
@@ -131,6 +136,18 @@ impl EventLoop {
                 ..
             })) => self.handle_gossipsub_message(&message, peer_id).await,
 
+            SwarmEvent::NewListenAddr { .. } => {
+                self.peer_counter += 1;
+                if self.peer_counter == 4 {
+                    self.event_sender
+                        .send(Event::RegistrationRequest {
+                            username: self.username.clone(),
+                        })
+                        .await
+                        .expect("Event receiver was dropped");
+                }
+            }
+
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)
                 | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
@@ -144,15 +161,13 @@ impl EventLoop {
             | SwarmEvent::IncomingConnectionError { .. }
             | SwarmEvent::ConnectionEstablished { .. }
             | SwarmEvent::NewExternalAddrOfPeer { .. }
-            | SwarmEvent::OutgoingConnectionError { .. }
-            | SwarmEvent::NewListenAddr { .. } => {}
+            | SwarmEvent::OutgoingConnectionError { .. } => {}
 
             event => println!("{event:?}"),
         }
     }
 }
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub(crate) enum Event {
     InboundTradeOffer {
@@ -173,5 +188,8 @@ pub(crate) enum Event {
     InboundChat {
         peer_id: PeerId,
         message: String,
+    },
+    RegistrationRequest {
+        username: String,
     },
 }

@@ -211,6 +211,9 @@ pub async fn handle_network_event(event: Option<Event>, network_client: &mut Cli
             }
             println!("{message}");
         }
+        Event::RegistrationRequest { username } => {
+            network_client.register_username(username).await;
+        }
     }
 }
 

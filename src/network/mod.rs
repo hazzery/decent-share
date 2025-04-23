@@ -65,6 +65,7 @@ pub(crate) struct NoResponse();
 ///
 /// - The network task driving the network itself.
 pub(crate) fn new(
+    username: String,
     secret_key_seed: Option<u8>,
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), anyhow::Error> {
     // Create a public/private key pair, either random or based on a seed.
@@ -157,6 +158,6 @@ pub(crate) fn new(
             username_store: Arc::default(),
         },
         event_receiver,
-        EventLoop::new(swarm, command_receiver, event_sender, topic),
+        EventLoop::new(swarm, command_receiver, event_sender, topic, username),
     ))
 }
