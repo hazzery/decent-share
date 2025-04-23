@@ -44,7 +44,7 @@ impl EventLoop {
     ) {
         let key = kad::RecordKey::new(&username.to_lowercase().into_bytes());
         let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
-        self.pending_name_request.insert(query_id, sender);
+        self.pending_peer_id_request.insert(query_id, sender);
     }
 
     pub(in crate::network::event_loop) fn handle_find_peer_username(

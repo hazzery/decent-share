@@ -27,10 +27,9 @@ pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
-    peer_id_username_map: HashMap<PeerId, String>,
     pending_request_message:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
-    pending_name_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
+    pending_peer_id_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
     pending_username_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<String>>>,
     pending_trade_response_response:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<Option<Vec<u8>>>>>,
@@ -50,9 +49,8 @@ impl EventLoop {
             swarm,
             command_receiver,
             event_sender,
-            peer_id_username_map: HashMap::default(),
             pending_request_message: HashMap::default(),
-            pending_name_request: HashMap::default(),
+            pending_peer_id_request: HashMap::default(),
             pending_username_request: HashMap::default(),
             pending_trade_response_response: HashMap::default(),
             outgoing_trade_offers: HashMap::default(),

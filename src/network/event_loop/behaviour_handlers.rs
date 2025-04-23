@@ -5,7 +5,6 @@ use libp2p::{
     kad::{self, QueryId},
     request_response, Multiaddr, PeerId,
 };
-use std::borrow::ToOwned;
 
 use super::{Event, EventLoop};
 use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
@@ -19,35 +18,35 @@ impl EventLoop {
     ) {
         match record {
             Ok(kad::GetRecordOk::FoundRecord(kad::PeerRecord {
-                record: kad::Record { key, value, .. },
+                record: kad::Record { value, .. },
                 ..
             })) => {
-                if let Some(sender) = self.pending_name_request.remove(&query_id) {
+                if let Some(peer_id_sender) = self.pending_peer_id_request.remove(&query_id) {
                     let peer_id = PeerId::from_bytes(&value).ok();
-
-                    if let Some(peer_id) = peer_id {
-                        if let Ok(username) = String::from_utf8(key.to_vec()) {
-                            self.peer_id_username_map.insert(peer_id, username);
-                        }
-                    }
-
-                    sender.send(peer_id).expect("Receiver not to be dropped");
-                } else if let Some(sender) = self.pending_username_request.remove(&query_id) {
+                    peer_id_sender
+                        .send(peer_id)
+                        .expect("Receiver not to be dropped");
+                } else if let Some(username_sender) =
+                    self.pending_username_request.remove(&query_id)
+                {
                     let username = String::from_utf8(value).map_err(|error| anyhow!(error));
-
-                    if let Ok(ref username) = username {
-                        if let Ok(peer_id) = PeerId::from_bytes(&key.to_vec()) {
-                            self.peer_id_username_map
-                                .insert(peer_id, username.to_owned());
-                        }
-                    }
-                    sender.send(username).expect("Receiver not to be dropped");
+                    username_sender
+                        .send(username)
+                        .expect("Receiver not to be dropped");
                 }
             }
             Ok(_) => {}
-            Err(_) => {
-                if let Some(sender) = self.pending_name_request.remove(&query_id) {
-                    let _ = sender.send(None);
+            Err(error) => {
+                if let Some(peer_id_sender) = self.pending_peer_id_request.remove(&query_id) {
+                    peer_id_sender
+                        .send(None)
+                        .expect("Peer ID sender was dropped");
+                } else if let Some(username_sender) =
+                    self.pending_username_request.remove(&query_id)
+                {
+                    username_sender
+                        .send(Err(anyhow!(error)))
+                        .expect("Username receiver was dropped");
                 }
             }
         }
