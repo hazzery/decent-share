@@ -208,11 +208,13 @@ impl EventLoop {
                 response,
                 request_id,
             } => {
-                let offered_bytes_sender = self
-                    .pending_trade_response_response
-                    .remove(&request_id)
-                    .expect("Trade response to still be pending");
-                let _ = offered_bytes_sender.send(Ok(response.offered_file_bytes));
+                if let Some(offered_bytes_sender) =
+                    self.pending_trade_response_response.remove(&request_id)
+                {
+                    offered_bytes_sender
+                        .send(Ok(response.offered_file_bytes))
+                        .expect("Offered bytes receiver was dropped");
+                }
             }
         }
     }
