@@ -156,7 +156,7 @@ pub(crate) async fn handle_std_in(
             }
         }
 
-        action => println!("Unknown action {action}"),
+        action => println!("Unknown action '{action}'"),
     }
 }
 
