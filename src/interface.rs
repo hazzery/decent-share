@@ -3,6 +3,13 @@ use crate::{
     network::{Client, Event},
 };
 
+const TRADE_USAGE: &str = "Usage: trade <name_of_offered_file> <path_to_offered_file> <recipient_username> <name_of_requested_file> <path_to_put_requested_file>";
+const SEND_USAGE: &str = "Usage: send <message_to_broadcast>";
+const DM_USAGE: &str = "Usage: dm <username> <message>";
+const ACCEPT_USAGE: &str = "Usage: accept <offerer_username> <name_of_offered_file> <path_to_place_received_file> <name_of_requested_file> <path_to_source_requested_file>";
+const DECLINE_USAGE: &str =
+    "Usage: decline <offerer_username> <name_of_offered_file> <name_of_requested_file>";
+
 #[allow(clippy::too_many_lines)]
 pub(crate) async fn handle_std_in(
     command: Result<Option<String>, std::io::Error>,
@@ -26,31 +33,30 @@ pub(crate) async fn handle_std_in(
     match action.to_lowercase().as_str() {
         "send" => {
             let Some(message) = arguments.get(1) else {
-                println!("Usage: send <message_to_broadcast>");
+                println!("{SEND_USAGE}");
                 return;
             };
             handle_send(message, network_client).await;
         }
         "trade" => {
-            let trade_usage = "Usage: trade <name_of_offered_file> <path_to_offered_file> <recipient_username> <name_of_requested_file> <path_to_put_requested_file>";
             let Some(offered_file_name) = arguments.get(1) else {
-                println!("{trade_usage}");
+                println!("{TRADE_USAGE}");
                 return;
             };
             let Some(offered_file_path) = arguments.get(2) else {
-                println!("{trade_usage}");
+                println!("{TRADE_USAGE}");
                 return;
             };
             let Some(username) = arguments.get(3) else {
-                println!("{trade_usage}");
+                println!("{TRADE_USAGE}");
                 return;
             };
             let Some(requested_file_name) = arguments.get(4) else {
-                println!("{trade_usage}");
+                println!("{TRADE_USAGE}");
                 return;
             };
             let Some(requested_file_path) = arguments.get(5) else {
-                println!("{trade_usage}");
+                println!("{TRADE_USAGE}");
                 return;
             };
 
@@ -86,13 +92,12 @@ pub(crate) async fn handle_std_in(
             }
         }
         "dm" => {
-            let dm_usage = "Usage: dm <username> <message>";
             let Some(username) = arguments.get(1) else {
-                println!("{dm_usage}");
+                println!("{DM_USAGE}");
                 return;
             };
             let Some(message) = arguments.get(2) else {
-                println!("{dm_usage}");
+                println!("{DM_USAGE}");
                 return;
             };
             if let Err(error) = network_client
@@ -103,26 +108,24 @@ pub(crate) async fn handle_std_in(
             }
         }
         "accept" => {
-            let accept_usage = "Usage: accept <offerer_username> <name_of_offered_file> <path_to_place_received_file> <name_of_requested_file> <path_to_source_requested_file>";
-
             let Some(username) = arguments.get(1) else {
-                println!("{accept_usage}");
+                println!("{ACCEPT_USAGE}");
                 return;
             };
             let Some(offered_file_name) = arguments.get(2) else {
-                println!("{accept_usage}");
+                println!("{ACCEPT_USAGE}");
                 return;
             };
             let Some(offered_file_path) = arguments.get(3) else {
-                println!("{accept_usage}");
+                println!("{ACCEPT_USAGE}");
                 return;
             };
             let Some(requested_file_name) = arguments.get(4) else {
-                println!("{accept_usage}");
+                println!("{ACCEPT_USAGE}");
                 return;
             };
             let Some(requested_file_path) = arguments.get(5) else {
-                println!("{accept_usage}");
+                println!("{ACCEPT_USAGE}");
                 return;
             };
             if let Err(error) = handle_accept_trade(
@@ -139,18 +142,16 @@ pub(crate) async fn handle_std_in(
             }
         }
         "decline" => {
-            let decline_usage =
-                "Usage: decline <offerer_username> <name_of_offered_file> <name_of_requested_file>";
             let Some(username) = arguments.get(1) else {
-                println!("{decline_usage}");
+                println!("{DECLINE_USAGE}");
                 return;
             };
             let Some(offered_file_name) = arguments.get(2) else {
-                println!("{decline_usage}");
+                println!("{DECLINE_USAGE}");
                 return;
             };
             let Some(requested_file_name) = arguments.get(3) else {
-                println!("{decline_usage}");
+                println!("{DECLINE_USAGE}");
                 return;
             };
             if let Err(error) = network_client
