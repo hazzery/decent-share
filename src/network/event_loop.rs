@@ -28,7 +28,6 @@ pub(crate) struct EventLoop {
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
     peer_id_username_map: HashMap<PeerId, String>,
-    pending_dial: HashMap<PeerId, oneshot::Sender<DynResult<()>>>,
     pending_request_message:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_name_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
@@ -52,7 +51,6 @@ impl EventLoop {
             command_receiver,
             event_sender,
             peer_id_username_map: HashMap::default(),
-            pending_dial: HashMap::default(),
             pending_request_message: HashMap::default(),
             pending_name_request: HashMap::default(),
             pending_username_request: HashMap::default(),
@@ -121,14 +119,6 @@ impl EventLoop {
                 },
             )) => self.handle_trade_response_outbound_failure(request_id, error),
 
-            SwarmEvent::ConnectionEstablished {
-                peer_id, endpoint, ..
-            } => self.handle_connection_established(&peer_id, &endpoint),
-
-            SwarmEvent::OutgoingConnectionError { peer_id, error, .. } => {
-                self.handle_outgoing_connection_error(peer_id, error);
-            }
-
             SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                 self.handle_mdns_discovered(list);
             }
@@ -154,7 +144,9 @@ impl EventLoop {
             | SwarmEvent::IncomingConnection { .. }
             | SwarmEvent::ConnectionClosed { .. }
             | SwarmEvent::IncomingConnectionError { .. }
+            | SwarmEvent::ConnectionEstablished { .. }
             | SwarmEvent::NewExternalAddrOfPeer { .. }
+            | SwarmEvent::OutgoingConnectionError { .. }
             | SwarmEvent::NewListenAddr { .. } => {}
 
             event => println!("{event:?}"),

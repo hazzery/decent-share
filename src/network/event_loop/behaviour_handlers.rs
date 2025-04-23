@@ -1,9 +1,9 @@
 use anyhow::anyhow;
 use futures::SinkExt;
 use libp2p::{
-    core, gossipsub,
+    gossipsub,
     kad::{self, QueryId},
-    request_response, swarm, Multiaddr, PeerId,
+    request_response, Multiaddr, PeerId,
 };
 use std::borrow::ToOwned;
 
@@ -228,30 +228,6 @@ impl EventLoop {
         if let Some(offered_bytes_sender) = self.pending_trade_response_response.remove(&request_id)
         {
             let _ = offered_bytes_sender.send(Err(anyhow::Error::from(error)));
-        }
-    }
-
-    pub(in crate::network::event_loop) fn handle_connection_established(
-        &mut self,
-        peer_id: &PeerId,
-        endpoint: &core::ConnectedPoint,
-    ) {
-        if endpoint.is_dialer() {
-            if let Some(sender) = self.pending_dial.remove(peer_id) {
-                let _ = sender.send(Ok(()));
-            }
-        }
-    }
-
-    pub(in crate::network::event_loop) fn handle_outgoing_connection_error(
-        &mut self,
-        peer_id: Option<PeerId>,
-        error: swarm::DialError,
-    ) {
-        if let Some(peer_id) = peer_id {
-            if let Some(sender) = self.pending_dial.remove(&peer_id) {
-                let _ = sender.send(Err(anyhow!(error)));
-            }
         }
     }
 
