@@ -101,12 +101,11 @@ impl EventLoop {
         request_id: request_response::OutboundRequestId,
         error: request_response::OutboundFailure,
     ) {
-        println!("A direct messaging failure has occured: {error:?}");
-        let _ = self
-            .pending_request_message
+        self.pending_request_message
             .remove(&request_id)
             .expect("Message to still be pending.")
-            .send(Err(anyhow!(error)));
+            .send(Err(anyhow!(error)))
+            .expect("Direct messaging receiver dropped");
     }
 
     pub(in crate::network::event_loop) async fn handle_trade_offering_message(
@@ -223,10 +222,11 @@ impl EventLoop {
         request_id: request_response::OutboundRequestId,
         error: request_response::OutboundFailure,
     ) {
-        println!("A trade response failure has occured: {error:?}");
         if let Some(offered_bytes_sender) = self.pending_trade_response_response.remove(&request_id)
         {
-            let _ = offered_bytes_sender.send(Err(anyhow::Error::from(error)));
+            offered_bytes_sender
+                .send(Err(anyhow::Error::from(error)))
+                .expect("Offered bytes receiver was dropped");
         }
     }
 
