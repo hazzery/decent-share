@@ -157,7 +157,7 @@ pub(crate) fn new(
 
     Ok((
         Client {
-            sender: command_sender,
+            command_sender,
             username_store: Arc::default(),
         },
         event_receiver,

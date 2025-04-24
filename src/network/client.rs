@@ -15,7 +15,7 @@ use super::{event_loop::Command, username_store::UsernameStore};
 
 #[derive(Clone)]
 pub(crate) struct Client {
-    pub(super) sender: mpsc::Sender<Command>,
+    pub(super) command_sender: mpsc::Sender<Command>,
     pub(super) username_store: Arc<Mutex<UsernameStore>>,
 }
 
@@ -64,7 +64,7 @@ impl Client {
 
         let (error_sender, error_receiver) = oneshot::channel();
 
-        self.sender
+        self.command_sender
             .send(Command::MakeOffer {
                 offered_file_name,
                 offered_file_bytes,
@@ -74,9 +74,9 @@ impl Client {
                 error_sender,
             })
             .await
-            .expect("Command receiver not to be dropped.");
+            .expect("Command receiver was dropped");
 
-        error_receiver.await.expect("Error sender was dropped")
+        error_receiver.await.expect("Error receiver was dropped")
     }
 
     pub(crate) async fn accept_trade(
@@ -90,19 +90,22 @@ impl Client {
             bail!("'{username}' is not a register user");
         };
 
-        let (sender, receiver) = oneshot::channel();
-        self.sender
+        let (offered_bytes_sender, offered_bytes_receiver) = oneshot::channel();
+        self.command_sender
             .send(Command::RespondTrade {
                 peer_id,
                 requested_file_name,
                 offered_file_name,
                 requested_file_bytes: Some(requested_file_bytes),
-                offered_bytes_sender: Some(sender),
+                offered_bytes_sender: Some(offered_bytes_sender),
             })
             .await
-            .expect("Command receiver not to be dropped");
+            .expect("Command receiver was dropped");
 
-        match receiver.await.expect("Sender not to be dropped") {
+        match offered_bytes_receiver
+            .await
+            .expect("Offered bytes was dropped")
+        {
             Ok(Some(bytes)) => Ok(bytes),
             Ok(None) => Err(anyhow!("No bytes were received!")),
             Err(error) => Err(error),
@@ -118,7 +121,7 @@ impl Client {
         let Some(peer_id) = self.get_peer_id(username.clone()).await else {
             bail!("'{username}' is not a registered user");
         };
-        self.sender
+        self.command_sender
             .send(Command::RespondTrade {
                 peer_id,
                 requested_file_name,
@@ -127,28 +130,30 @@ impl Client {
                 offered_bytes_sender: None,
             })
             .await
-            .expect("Sender not to be dropped");
+            .expect("Command receiver was dropped");
         Ok(())
     }
 
     pub(crate) async fn register_username(&mut self, username: String) {
-        self.sender
+        self.command_sender
             .send(Command::RegisterName { username })
             .await
-            .expect("Name to register successfully");
+            .expect("Command receiver was dropped");
     }
 
     async fn find_user(&mut self, username: String) -> Option<PeerId> {
-        let (sender, receiver) = oneshot::channel();
-        self.sender
-            .send(Command::FindUser {
+        let (peer_id_sender, peer_id_receiver) = oneshot::channel();
+        self.command_sender
+            .send(Command::FindPeerId {
                 username: username.clone(),
-                sender,
+                peer_id_sender,
             })
             .await
-            .expect("Error sending FindUser command");
+            .expect("Command receiver was dropped");
 
-        let peer_id = receiver.await.expect("Sender not be dropped.");
+        let peer_id = peer_id_receiver
+            .await
+            .expect("Peer ID sender not be dropped.");
 
         if let Some(peer_id) = peer_id {
             self.username_store
@@ -162,14 +167,17 @@ impl Client {
 
     async fn find_peer_username(&mut self, peer_id: PeerId) -> Result<String, anyhow::Error> {
         let (username_sender, username_receiver) = oneshot::channel();
-        self.sender
+        self.command_sender
             .send(Command::FindPeerUsername {
                 peer_id,
                 username_sender,
             })
             .await
-            .expect("Error sending FindPeerUsername command");
-        let username = username_receiver.await.expect("sender not to be dropped");
+            .expect("Command receiver was dropped");
+
+        let username = username_receiver
+            .await
+            .expect("Username sender was dropped");
 
         if let Ok(ref username) = username {
             self.username_store
@@ -182,10 +190,10 @@ impl Client {
     }
 
     pub(crate) async fn send_message(&mut self, message: String) {
-        self.sender
+        self.command_sender
             .send(Command::SendMessage { message })
             .await
-            .expect("Message to send successfully");
+            .expect("Command receiver was dropped");
     }
 
     pub(crate) async fn direct_message(
@@ -193,20 +201,23 @@ impl Client {
         username: String,
         message: String,
     ) -> Result<(), anyhow::Error> {
-        let (sender, receiver) = oneshot::channel();
+        let (error_sender, error_receiver) = oneshot::channel();
 
         let Some(peer_id) = self.get_peer_id(username.clone()).await else {
             bail!("'{username}' is not a registered user");
         };
 
-        self.sender
+        self.command_sender
             .send(Command::DirectMessage {
                 peer_id,
                 message,
-                sender,
+                error_sender,
             })
             .await
-            .expect("Direct message to send successfully");
-        receiver.await.expect("Command receiver to not be dropped")
+            .expect("Command receiver was dropped");
+
+        error_receiver
+            .await
+            .expect("Error receiver was dropped")
     }
 }

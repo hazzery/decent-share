@@ -28,14 +28,14 @@ impl EventLoop {
                     let peer_id = PeerId::from_bytes(&value).ok();
                     peer_id_sender
                         .send(peer_id)
-                        .expect("Receiver not to be dropped");
+                        .expect("Peer ID receiver was dropped");
                 } else if let Some(username_sender) =
                     self.pending_username_request.remove(&query_id)
                 {
                     let username = String::from_utf8(value).map_err(|error| anyhow!(error));
                     username_sender
                         .send(username)
-                        .expect("Receiver not to be dropped");
+                        .expect("Username receiver was dropped");
                 }
             }
             Ok(_) => {}
@@ -43,7 +43,7 @@ impl EventLoop {
                 if let Some(peer_id_sender) = self.pending_peer_id_request.remove(&query_id) {
                     peer_id_sender
                         .send(None)
-                        .expect("Peer ID sender was dropped");
+                        .expect("Peer ID receiver was dropped");
                 } else if let Some(username_sender) =
                     self.pending_username_request.remove(&query_id)
                 {
@@ -81,19 +81,19 @@ impl EventLoop {
                         message: request.0,
                     })
                     .await
-                    .expect("Event sender not to be dropped");
+                    .expect("Event receiver was dropped");
 
                 self.swarm
                     .behaviour_mut()
                     .direct_messaging
                     .send_response(channel, NoResponse())
-                    .expect("The response to be sent");
+                    .expect("Connection to peer was dropped");
             }
             request_response::Message::Response { request_id, .. } => {
                 let _ = self
                     .pending_request_message
                     .remove(&request_id)
-                    .expect("Message to still be pending.")
+                    .expect("Message was not pending")
                     .send(Ok(()));
             }
         }
@@ -106,9 +106,9 @@ impl EventLoop {
     ) {
         self.pending_request_message
             .remove(&request_id)
-            .expect("Message to still be pending.")
+            .expect("Message was not pending")
             .send(Err(anyhow!(error)))
-            .expect("Direct messaging receiver dropped");
+            .expect("Direct messaging receiver was dropped");
     }
 
     pub(in crate::network::event_loop) async fn handle_trade_offering_message(
@@ -124,7 +124,7 @@ impl EventLoop {
                     .behaviour_mut()
                     .trade_offering
                     .send_response(channel, NoResponse())
-                    .expect("Connection to peer to still be open");
+                    .expect("Connection to peer was dropped");
 
                 self.inbound_trade_offers.insert((peer_id, request.clone()));
 
@@ -135,7 +135,7 @@ impl EventLoop {
                         requested_file_name: request.requested_file_name,
                     })
                     .await
-                    .expect("Event receiver not to be dropped");
+                    .expect("Event receiver was dropped");
             }
             request_response::Message::Response { .. } => {}
         }
@@ -164,7 +164,6 @@ impl EventLoop {
                 };
                 let entry = self.outgoing_trade_offers.remove(&(peer_id, offer));
                 let Some((offered_file_bytes, requested_file_path)) = entry else {
-                    println!("Received invalid trade response!");
                     return;
                 };
 
@@ -176,7 +175,7 @@ impl EventLoop {
                         was_accepted: request.requested_file_bytes.is_some(),
                     })
                     .await
-                    .expect("Event receiver not to be dropped");
+                    .expect("Event receiver was dropped");
 
                 let mut response: Option<Vec<u8>> = None;
 
@@ -203,7 +202,7 @@ impl EventLoop {
                             offered_file_bytes: response,
                         },
                     )
-                    .expect("Connection to peer to still be open");
+                    .expect("Connection to peer was dropped");
             }
             request_response::Message::Response {
                 response,
@@ -243,7 +242,7 @@ impl EventLoop {
         self.event_sender
             .send(Event::InboundChat { peer_id, message })
             .await
-            .expect("Event sender not to be dropped");
+            .expect("Event receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_rendezvous_discovered(

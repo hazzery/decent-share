@@ -37,14 +37,14 @@ impl EventLoop {
             .expect("Failed to store record locally");
     }
 
-    pub(in crate::network::event_loop) fn handle_find_user(
+    pub(in crate::network::event_loop) fn handle_find_peer_id(
         &mut self,
         username: &str,
-        sender: oneshot::Sender<Option<PeerId>>,
+        peer_id_sender: oneshot::Sender<Option<PeerId>>,
     ) {
         let key = kad::RecordKey::new(&username.to_lowercase().into_bytes());
         let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
-        self.pending_peer_id_request.insert(query_id, sender);
+        self.pending_peer_id_request.insert(query_id, peer_id_sender);
     }
 
     pub(in crate::network::event_loop) fn handle_find_peer_username(
@@ -136,13 +136,13 @@ impl EventLoop {
         &mut self,
         peer_id: &PeerId,
         message: String,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
+        error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
         let request_id = self
             .swarm
             .behaviour_mut()
             .direct_messaging
             .send_request(peer_id, DirectMessage(message));
-        self.pending_request_message.insert(request_id, sender);
+        self.pending_request_message.insert(request_id, error_sender);
     }
 }
