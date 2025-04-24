@@ -39,10 +39,10 @@ async fn main() -> Result<(), anyhow::Error> {
         )
         .try_init();
 
-    let opt = Opt::parse();
+    let arguments = Arguments::parse();
 
     let (mut network_client, mut network_events, network_event_loop) =
-        network::new(&opt.rendezvous_address)?;
+        network::new(&arguments.rendezvous_address)?;
 
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());
@@ -58,7 +58,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
 #[derive(Parser, Debug)]
 #[command(name = "libp2p file sharing example")]
-struct Opt {
+struct Arguments {
     /// A username to register with for user identification.
     #[arg(long, short)]
     username: String,
