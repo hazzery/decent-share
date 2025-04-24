@@ -28,8 +28,10 @@ libp2p = { version = "0.55.0", features = [
   "mdns",
   "gossipsub",
   "quic",
+  "rendezvous",
 ] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+tracing = "0.1.41"
 
 [lints.clippy]
 pedantic = "warn"

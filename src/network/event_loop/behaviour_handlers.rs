@@ -3,11 +3,14 @@ use futures::SinkExt;
 use libp2p::{
     gossipsub,
     kad::{self, QueryId},
-    request_response, Multiaddr, PeerId,
+    multiaddr, rendezvous, request_response, Multiaddr, PeerId,
 };
 
 use super::{Event, EventLoop};
-use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
+use crate::network::{
+    event_loop::RENDEZVOUS_NAMESPACE, DirectMessage, NoResponse, TradeOffer, TradeResponse,
+    TradeResponseResponse,
+};
 
 impl EventLoop {
     #[allow(clippy::unused_self)]
@@ -269,5 +272,49 @@ impl EventLoop {
             .send(Event::InboundChat { peer_id, message })
             .await
             .expect("Event sender not to be dropped");
+    }
+
+    pub(in crate::network::event_loop) fn handle_rendezvous_discovered(
+        &mut self,
+        registrations: Vec<rendezvous::Registration>,
+        cookie: rendezvous::Cookie,
+    ) {
+        self.cookie.replace(cookie);
+
+        for registration in registrations {
+            for address in registration.record.addresses() {
+                let peer = registration.record.peer_id();
+                tracing::info!(%peer, %address, "Discovered peer");
+
+                let p2p_suffix = multiaddr::Protocol::P2p(peer);
+                let address_with_p2p =
+                    if address.ends_with(&Multiaddr::empty().with(p2p_suffix.clone())) {
+                        address.clone()
+                    } else {
+                        address.clone().with(p2p_suffix)
+                    };
+
+                self.swarm.dial(address_with_p2p).unwrap();
+            }
+        }
+    }
+
+    pub(in crate::network::event_loop) fn handle_connected_to_rendezvous_server(&mut self) {
+        if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
+            rendezvous::Namespace::from_static("rendezvous"),
+            self.rendezvous_peer_id,
+            None,
+        ) {
+            tracing::error!("Failed to register: {error}");
+            return;
+        }
+        tracing::info!("Connection established with rendezvous point");
+
+        self.swarm.behaviour_mut().rendezvous.discover(
+            Some(rendezvous::Namespace::new(RENDEZVOUS_NAMESPACE.to_string()).unwrap()),
+            None,
+            None,
+            self.rendezvous_peer_id,
+        );
     }
 }

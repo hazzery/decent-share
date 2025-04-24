@@ -5,6 +5,7 @@ mod command_handlers;
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
+    time::Duration,
 };
 
 use futures::{
@@ -12,7 +13,7 @@ use futures::{
     StreamExt,
 };
 use libp2p::{
-    gossipsub, kad, mdns, request_response,
+    gossipsub, kad, mdns, rendezvous, request_response,
     swarm::{Swarm, SwarmEvent},
     PeerId,
 };
@@ -23,8 +24,11 @@ pub(super) use command::Command;
 
 type DynResult<T> = Result<T, anyhow::Error>;
 
+const RENDEZVOUS_NAMESPACE: &str = "rendezvous";
+
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
+    rendezvous_peer_id: PeerId,
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
     pending_request_message:
@@ -36,6 +40,8 @@ pub(crate) struct EventLoop {
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
     inbound_trade_offers: HashSet<(PeerId, TradeOffer)>,
     gossipsub_topic: gossipsub::IdentTopic,
+    discover_tick: tokio::time::Interval,
+    cookie: Option<rendezvous::Cookie>,
 }
 
 impl EventLoop {
@@ -44,9 +50,11 @@ impl EventLoop {
         command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
         gossipsub_topic: gossipsub::IdentTopic,
+        rendezvous_peer_id: PeerId,
     ) -> Self {
         Self {
             swarm,
+            rendezvous_peer_id,
             command_receiver,
             event_sender,
             pending_request_message: HashMap::default(),
@@ -56,6 +64,8 @@ impl EventLoop {
             outgoing_trade_offers: HashMap::default(),
             inbound_trade_offers: HashSet::default(),
             gossipsub_topic,
+            discover_tick: tokio::time::interval(Duration::from_secs(30)),
+            cookie: None,
         }
     }
 
@@ -68,6 +78,17 @@ impl EventLoop {
                     // Command channel closed, thus shutting down the network event loop.
                     None => return,
                 },
+                _ = self.discover_tick.tick(), if self.cookie.is_some() => {
+                    self.swarm
+                        .behaviour_mut()
+                        .rendezvous
+                        .discover(
+                            Some(rendezvous::Namespace::new(RENDEZVOUS_NAMESPACE.to_string()).unwrap()),
+                            self.cookie.clone(),
+                            None,
+                            self.rendezvous_peer_id
+                        );
+                }
             }
         }
     }
@@ -130,6 +151,20 @@ impl EventLoop {
                 message,
                 ..
             })) => self.handle_gossipsub_message(&message, peer_id).await,
+
+            SwarmEvent::ConnectionEstablished { peer_id, .. }
+                if peer_id == self.rendezvous_peer_id =>
+            {
+                self.handle_connected_to_rendezvous_server();
+            }
+
+            SwarmEvent::Behaviour(BehaviourEvent::Rendezvous(
+                rendezvous::client::Event::Discovered {
+                    registrations,
+                    cookie,
+                    ..
+                },
+            )) => self.handle_rendezvous_discovered(registrations, cookie),
 
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)

@@ -8,18 +8,21 @@ use std::{
     time::Duration,
 };
 
-use futures::{channel::mpsc, prelude::*};
+use futures::{channel::mpsc, Stream};
 use libp2p::{
-    gossipsub, identity, kad, mdns, noise,
+    gossipsub, identity, kad, mdns, noise, rendezvous,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
-    tcp, yamux, StreamProtocol,
+    tcp, yamux, Multiaddr, PeerId, StreamProtocol,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{Error as TokioError, ErrorKind as TokioErrorKind};
 
 pub(crate) use client::Client;
 pub(crate) use event_loop::{Event, EventLoop};
+
+const RENDEZVOUS_POINT_PORT_NUMBER: u16 = 62649;
+pub const RENDEZVOUS_POINT_PEER_ID: &str = "12D3KooWDpJ7As7BWAwRMfu1VU2WCqNjvq387JEYKDBj4kx6nXTN";
 
 #[derive(NetworkBehaviour)]
 struct Behaviour {
@@ -29,6 +32,7 @@ struct Behaviour {
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
     gossipsub: gossipsub::Behaviour,
     mdns: mdns::tokio::Behaviour,
+    rendezvous: rendezvous::client::Behaviour,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -65,17 +69,10 @@ pub(crate) struct NoResponse();
 ///
 /// - The network task driving the network itself.
 pub(crate) fn new(
-    secret_key_seed: Option<u8>,
+    rendezvous_ip_address: &str,
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), anyhow::Error> {
     // Create a public/private key pair, either random or based on a seed.
-    let id_keys = match secret_key_seed {
-        Some(seed) => {
-            let mut bytes = [0u8; 32];
-            bytes[0] = seed;
-            identity::Keypair::ed25519_from_bytes(bytes).unwrap()
-        }
-        None => identity::Keypair::generate_ed25519(),
-    };
+    let id_keys = identity::Keypair::generate_ed25519();
     let peer_id = id_keys.public().to_peer_id();
 
     // Set a custom gossipsub configuration
@@ -131,10 +128,15 @@ pub(crate) fn new(
                     mdns::Config::default(),
                     keypair.public().to_peer_id(),
                 )?,
+                rendezvous: rendezvous::client::Behaviour::new(keypair.clone()),
             })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
+
+    let rendezvous_multi_address: Multiaddr =
+        format!("/ip4/{rendezvous_ip_address}/tcp/{RENDEZVOUS_POINT_PORT_NUMBER}").parse()?;
+    swarm.dial(rendezvous_multi_address)?;
 
     swarm
         .behaviour_mut()
@@ -151,12 +153,20 @@ pub(crate) fn new(
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
+    let rendezvous_peer_id: PeerId = RENDEZVOUS_POINT_PEER_ID.parse()?;
+
     Ok((
         Client {
             sender: command_sender,
             username_store: Arc::default(),
         },
         event_receiver,
-        EventLoop::new(swarm, command_receiver, event_sender, topic),
+        EventLoop::new(
+            swarm,
+            command_receiver,
+            event_sender,
+            topic,
+            rendezvous_peer_id,
+        ),
     ))
 }

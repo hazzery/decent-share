@@ -42,7 +42,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let opt = Opt::parse();
 
     let (mut network_client, mut network_events, network_event_loop) =
-        network::new(opt.secret_key_seed)?;
+        network::new(&opt.rendezvous_address)?;
 
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());
@@ -59,10 +59,11 @@ async fn main() -> Result<(), anyhow::Error> {
 #[derive(Parser, Debug)]
 #[command(name = "libp2p file sharing example")]
 struct Opt {
-    /// Fixed value to generate deterministic peer ID.
-    #[arg(long)]
-    secret_key_seed: Option<u8>,
-
+    /// A username to register with for user identification.
     #[arg(long, short)]
     username: String,
+
+    /// The IP address of the rendezvous server.
+    #[arg(long, short, default_value = "127.0.0.1")]
+    rendezvous_address: String,
 }
