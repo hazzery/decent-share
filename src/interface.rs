@@ -161,10 +161,7 @@ pub(crate) async fn handle_std_in(
 }
 
 pub async fn handle_network_event(event: Option<Event>, network_client: &mut Client) {
-    let Some(event) = event else {
-        println!("Received empty network event");
-        return;
-    };
+    let event = event.expect("Network event sender was dropped!");
 
     match event {
         Event::InboundTradeOffer {
