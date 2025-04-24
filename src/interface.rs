@@ -73,14 +73,6 @@ pub(crate) async fn handle_std_in(
                 eprintln!("Error offering trade: {error:?}");
             }
         }
-        "register" => {
-            let Some(username) = arguments.get(1) else {
-                println!("Missing username");
-                return;
-            };
-
-            network_client.register_username(username.clone()).await;
-        }
         "dm" => {
             let Some(username) = arguments.get(1) else {
                 println!("{DM_USAGE}");
