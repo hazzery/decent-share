@@ -140,16 +140,27 @@ impl EventLoop {
                     .await
                     .expect("Event receiver was dropped");
             }
-            request_response::Message::Response { .. } => {}
+            request_response::Message::Response { request_id, .. } => {
+                if let Some(status_sender) = self.pending_trade_offer_request.remove(&request_id) {
+                    status_sender
+                        .send(Ok(()))
+                        .expect("Status sender was dropped");
+                }
+            }
         }
     }
 
     #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_trade_offering_outbound_failure(
         &mut self,
-        error: &request_response::OutboundFailure,
+        error: request_response::OutboundFailure,
+        request_id: request_response::OutboundRequestId,
     ) {
-        println!("A trade offer failure has occured: {error:?}");
+        if let Some(status_sender) = self.pending_trade_offer_request.remove(&request_id) {
+            status_sender
+                .send(Err(anyhow!(error)))
+                .expect("Status receiver was dropped");
+        }
     }
 
     pub(in crate::network::event_loop) async fn handle_trade_response_message(

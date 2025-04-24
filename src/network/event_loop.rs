@@ -37,6 +37,8 @@ pub(crate) struct EventLoop {
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_peer_id_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
     pending_username_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<String>>>,
+    pending_trade_offer_request:
+        HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_trade_response_response:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<Option<Vec<u8>>>>>,
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
@@ -63,6 +65,7 @@ impl EventLoop {
             pending_request_message: HashMap::default(),
             pending_peer_id_request: HashMap::default(),
             pending_username_request: HashMap::default(),
+            pending_trade_offer_request: HashMap::default(),
             pending_trade_response_response: HashMap::default(),
             outgoing_trade_offers: HashMap::default(),
             inbound_trade_offers: HashSet::default(),
@@ -129,8 +132,10 @@ impl EventLoop {
             )) => self.handle_trade_offering_message(message, peer).await,
 
             SwarmEvent::Behaviour(BehaviourEvent::TradeOffering(
-                request_response::Event::OutboundFailure { error, .. },
-            )) => self.handle_trade_offering_outbound_failure(&error),
+                request_response::Event::OutboundFailure {
+                    error, request_id, ..
+                },
+            )) => self.handle_trade_offering_outbound_failure(error, request_id),
 
             SwarmEvent::Behaviour(BehaviourEvent::TradeResponse(
                 request_response::Event::Message { peer, message, .. },

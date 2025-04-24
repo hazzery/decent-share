@@ -82,21 +82,22 @@ impl EventLoop {
                 .expect("Error receiver was dropped");
             return;
         }
+
         let offer = TradeOffer {
             offered_file_name,
             requested_file_name,
         };
-        self.swarm
+        let query_id = self
+            .swarm
             .behaviour_mut()
             .trade_offering
             .send_request(&peer_id, offer.clone());
 
+        self.pending_trade_offer_request
+            .insert(query_id, error_sender);
+
         self.outgoing_trade_offers
             .insert((peer_id, offer), (offered_file_bytes, requested_file_path));
-
-        error_sender
-            .send(Ok(()))
-            .expect("Error receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_respond_trade(
