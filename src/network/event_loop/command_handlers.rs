@@ -8,7 +8,11 @@ use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
 
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_register_name(&mut self, username: &str) {
+    pub(in crate::network::event_loop) fn handle_register_name(
+        &mut self,
+        username: &str,
+        status_sender: oneshot::Sender<Result<(), kad::PutRecordError>>,
+    ) {
         let peer_id_bytes = self.swarm.local_peer_id().to_bytes();
         let username_bytes = username.to_lowercase().into_bytes();
 
@@ -18,11 +22,15 @@ impl EventLoop {
             publisher: None,
             expires: None,
         };
-        self.swarm
+        let query_id = self
+            .swarm
             .behaviour_mut()
             .kademlia
             .put_record(record, kad::Quorum::One)
             .expect("Failed to store record locally");
+
+        self.pending_register_username
+            .insert(query_id, status_sender);
 
         let record = kad::Record {
             key: kad::RecordKey::new(&peer_id_bytes),
@@ -44,7 +52,8 @@ impl EventLoop {
     ) {
         let key = kad::RecordKey::new(&username.to_lowercase().into_bytes());
         let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
-        self.pending_peer_id_request.insert(query_id, peer_id_sender);
+        self.pending_peer_id_request
+            .insert(query_id, peer_id_sender);
     }
 
     pub(in crate::network::event_loop) fn handle_find_peer_username(
@@ -143,6 +152,7 @@ impl EventLoop {
             .behaviour_mut()
             .direct_messaging
             .send_request(peer_id, DirectMessage(message));
-        self.pending_request_message.insert(request_id, error_sender);
+        self.pending_request_message
+            .insert(request_id, error_sender);
     }
 }

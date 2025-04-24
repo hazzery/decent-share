@@ -9,7 +9,7 @@ use futures::{
     channel::{mpsc, oneshot},
     SinkExt,
 };
-use libp2p::PeerId;
+use libp2p::{kad, PeerId};
 
 use super::{event_loop::Command, username_store::UsernameStore};
 
@@ -134,11 +134,21 @@ impl Client {
         Ok(())
     }
 
-    pub(crate) async fn register_username(&mut self, username: String) {
+    pub(crate) async fn register_username(
+        &mut self,
+        username: String,
+    ) -> Result<(), kad::PutRecordError> {
+        let (status_sender, status_receiver) = oneshot::channel();
+
         self.command_sender
-            .send(Command::RegisterName { username })
+            .send(Command::RegisterName {
+                username,
+                status_sender,
+            })
             .await
             .expect("Command receiver was dropped");
+
+        status_receiver.await.expect("Status sender was dropped")
     }
 
     async fn find_user(&mut self, username: String) -> Option<PeerId> {
@@ -216,8 +226,6 @@ impl Client {
             .await
             .expect("Command receiver was dropped");
 
-        error_receiver
-            .await
-            .expect("Error receiver was dropped")
+        error_receiver.await.expect("Error receiver was dropped")
     }
 }

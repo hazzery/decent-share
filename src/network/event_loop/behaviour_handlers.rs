@@ -59,10 +59,13 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_put_record(
         &mut self,
         record: kad::PutRecordResult,
+        query_id: QueryId,
     ) {
-        match record {
-            Ok(kad::PutRecordOk { .. }) => println!("Successfully stored record!"),
-            Err(error) => eprintln!("Failed to store record: {error:?}"),
+        if let Some(status_sender) = self.pending_register_username.remove(&query_id) {
+            let status = record.map(|_| ());
+            status_sender
+                .send(status)
+                .expect("Status receiver was dropped");
         }
     }
 

@@ -31,6 +31,8 @@ pub(crate) struct EventLoop {
     rendezvous_peer_id: PeerId,
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
+    pending_register_username:
+        HashMap<kad::QueryId, oneshot::Sender<Result<(), kad::PutRecordError>>>,
     pending_request_message:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_peer_id_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
@@ -57,6 +59,7 @@ impl EventLoop {
             rendezvous_peer_id,
             command_receiver,
             event_sender,
+            pending_register_username: HashMap::default(),
             pending_request_message: HashMap::default(),
             pending_peer_id_request: HashMap::default(),
             pending_username_request: HashMap::default(),
@@ -106,9 +109,10 @@ impl EventLoop {
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
                     result: kad::QueryResult::PutRecord(record),
+                    id: query_id,
                     ..
                 },
-            )) => self.handle_put_record(record),
+            )) => self.handle_put_record(record, query_id),
 
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::Message { peer, message, .. },

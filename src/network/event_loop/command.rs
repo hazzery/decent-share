@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use futures::channel::oneshot;
-use libp2p::PeerId;
+use libp2p::{kad, PeerId};
 
 use super::EventLoop;
 
@@ -9,6 +9,7 @@ use super::EventLoop;
 pub(crate) enum Command {
     RegisterName {
         username: String,
+        status_sender: oneshot::Sender<Result<(), kad::PutRecordError>>,
     },
     FindPeerId {
         username: String,
@@ -46,8 +47,14 @@ pub(crate) enum Command {
 impl EventLoop {
     pub fn handle_command(&mut self, command: Command) {
         match command {
-            Command::RegisterName { username } => self.handle_register_name(&username),
-            Command::FindPeerId { username, peer_id_sender } => self.handle_find_peer_id(&username, peer_id_sender),
+            Command::RegisterName {
+                username,
+                status_sender,
+            } => self.handle_register_name(&username, status_sender),
+            Command::FindPeerId {
+                username,
+                peer_id_sender,
+            } => self.handle_find_peer_id(&username, peer_id_sender),
             Command::FindPeerUsername {
                 peer_id,
                 username_sender,
