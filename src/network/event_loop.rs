@@ -46,6 +46,7 @@ pub(crate) struct EventLoop {
     gossipsub_topic: gossipsub::IdentTopic,
     discover_tick: tokio::time::Interval,
     cookie: Option<rendezvous::Cookie>,
+    rendezvous_namespace: rendezvous::Namespace,
 }
 
 impl EventLoop {
@@ -72,6 +73,7 @@ impl EventLoop {
             gossipsub_topic,
             discover_tick: tokio::time::interval(Duration::from_secs(30)),
             cookie: None,
+            rendezvous_namespace: rendezvous::Namespace::from_static(RENDEZVOUS_NAMESPACE),
         }
     }
 
@@ -89,7 +91,7 @@ impl EventLoop {
                         .behaviour_mut()
                         .rendezvous
                         .discover(
-                            Some(rendezvous::Namespace::new(RENDEZVOUS_NAMESPACE.to_string()).unwrap()),
+                            Some(self.rendezvous_namespace.clone()),
                             self.cookie.clone(),
                             None,
                             self.rendezvous_peer_id

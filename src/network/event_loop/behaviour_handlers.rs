@@ -7,10 +7,7 @@ use libp2p::{
 };
 
 use super::{Event, EventLoop};
-use crate::network::{
-    event_loop::RENDEZVOUS_NAMESPACE, DirectMessage, NoResponse, TradeOffer, TradeResponse,
-    TradeResponseResponse,
-};
+use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
 impl EventLoop {
     #[allow(clippy::unused_self)]
@@ -296,7 +293,7 @@ impl EventLoop {
 
     pub(in crate::network::event_loop) fn handle_connected_to_rendezvous_server(&mut self) {
         self.swarm.behaviour_mut().rendezvous.discover(
-            Some(rendezvous::Namespace::from_static(RENDEZVOUS_NAMESPACE)),
+            Some(self.rendezvous_namespace.clone()),
             None,
             None,
             self.rendezvous_peer_id,
@@ -312,7 +309,7 @@ impl EventLoop {
         // local address.
         self.swarm.add_external_address(info.observed_addr);
         if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
-            rendezvous::Namespace::from_static("rendezvous"),
+            self.rendezvous_namespace.clone(),
             self.rendezvous_peer_id,
             None,
         ) {
