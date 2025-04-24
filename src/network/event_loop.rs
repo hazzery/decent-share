@@ -158,23 +158,10 @@ impl EventLoop {
                 },
             )) => self.handle_rendezvous_discovered(registrations, cookie),
 
-            // once `/identify` did its job, we know our external address and can register
             SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
                 info,
                 ..
-            })) => {
-                // Register our external address. Needs to be done explicitly
-                // for this case, as it's a local address.
-                self.swarm.add_external_address(info.observed_addr);
-                if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
-                    rendezvous::Namespace::from_static("rendezvous"),
-                    self.rendezvous_peer_id,
-                    None,
-                ) {
-                    tracing::error!("Failed to register: {error}");
-                }
-                tracing::info!("Connection established with rendezvous point");
-            }
+            })) => self.handle_identify_received(info),
 
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)

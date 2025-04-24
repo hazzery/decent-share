@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use futures::SinkExt;
 use libp2p::{
-    gossipsub,
+    gossipsub, identify,
     kad::{self, QueryId},
     multiaddr, rendezvous, request_response, Multiaddr, PeerId,
 };
@@ -288,5 +288,23 @@ impl EventLoop {
             None,
             self.rendezvous_peer_id,
         );
+    }
+
+    pub(in crate::network::event_loop) fn handle_identify_received(
+        &mut self,
+        info: identify::Info,
+    ) {
+        // once `/identify` did its job, we know our external address and can
+        // register. This needs to be done explicitly for this case, as it's a
+        // local address.
+        self.swarm.add_external_address(info.observed_addr);
+        if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
+            rendezvous::Namespace::from_static("rendezvous"),
+            self.rendezvous_peer_id,
+            None,
+        ) {
+            tracing::error!("Failed to register: {error}");
+        }
+        tracing::info!("Connection established with rendezvous point");
     }
 }
