@@ -10,7 +10,7 @@ use std::{
 
 use futures::{channel::mpsc, Stream};
 use libp2p::{
-    gossipsub, identity, kad, mdns, noise, rendezvous,
+    gossipsub, identify, identity, kad, noise, rendezvous,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
     tcp, yamux, Multiaddr, PeerId, StreamProtocol,
@@ -31,8 +31,8 @@ struct Behaviour {
     direct_messaging: request_response::cbor::Behaviour<DirectMessage, NoResponse>,
     kademlia: kad::Behaviour<kad::store::MemoryStore>,
     gossipsub: gossipsub::Behaviour,
-    mdns: mdns::tokio::Behaviour,
     rendezvous: rendezvous::client::Behaviour,
+    identify: identify::Behaviour,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -124,19 +124,15 @@ pub(crate) fn new(
                     gossipsub::MessageAuthenticity::Signed(keypair.clone()),
                     gossipsub_config,
                 )?,
-                mdns: mdns::tokio::Behaviour::new(
-                    mdns::Config::default(),
-                    keypair.public().to_peer_id(),
-                )?,
                 rendezvous: rendezvous::client::Behaviour::new(keypair.clone()),
+                identify: identify::Behaviour::new(identify::Config::new(
+                    "rendezvous-identify/1.0.0".to_string(),
+                    keypair.public(),
+                )),
             })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
-
-    let rendezvous_multi_address: Multiaddr =
-        format!("/ip4/{rendezvous_ip_address}/tcp/{RENDEZVOUS_POINT_PORT_NUMBER}").parse()?;
-    swarm.dial(rendezvous_multi_address)?;
 
     swarm
         .behaviour_mut()
@@ -154,6 +150,10 @@ pub(crate) fn new(
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
     let rendezvous_peer_id: PeerId = RENDEZVOUS_POINT_PEER_ID.parse()?;
+
+    let rendezvous_multi_address: Multiaddr =
+        format!("/ip4/{rendezvous_ip_address}/tcp/{RENDEZVOUS_POINT_PORT_NUMBER}").parse()?;
+    swarm.dial(rendezvous_multi_address)?;
 
     Ok((
         Client {

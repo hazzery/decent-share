@@ -22,7 +22,7 @@ use std::error::Error;
 
 use futures::StreamExt;
 use libp2p::{
-    noise, rendezvous,
+    identify, noise, rendezvous,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
 };
@@ -45,8 +45,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
             noise::Config::new,
             yamux::Config::default,
         )?
-        .with_behaviour(|_| RendezvousServerBehaviour {
+        .with_behaviour(|keypair| RendezvousServerBehaviour {
             rendezvous: rendezvous::server::Behaviour::new(rendezvous::server::Config::default()),
+            identify: identify::Behaviour::new(identify::Config::new(
+                "rendezvous-identify/1.0.0".to_string(),
+                keypair.public(),
+            )),
         })?
         .build();
 
@@ -93,4 +97,5 @@ async fn main() -> Result<(), Box<dyn Error>> {
 #[derive(NetworkBehaviour)]
 struct RendezvousServerBehaviour {
     rendezvous: rendezvous::server::Behaviour,
+    identify: identify::Behaviour,
 }

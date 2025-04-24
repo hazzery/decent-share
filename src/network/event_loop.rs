@@ -13,7 +13,7 @@ use futures::{
     StreamExt,
 };
 use libp2p::{
-    gossipsub, kad, mdns, rendezvous, request_response,
+    gossipsub, identify, kad, rendezvous, request_response,
     swarm::{Swarm, SwarmEvent},
     PeerId,
 };
@@ -138,14 +138,6 @@ impl EventLoop {
                 },
             )) => self.handle_trade_response_outbound_failure(request_id, error),
 
-            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                self.handle_mdns_discovered(list);
-            }
-
-            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                self.handle_mdns_expired(&list);
-            }
-
             SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source: peer_id,
                 message,
@@ -166,12 +158,37 @@ impl EventLoop {
                 },
             )) => self.handle_rendezvous_discovered(registrations, cookie),
 
+            // once `/identify` did its job, we know our external address and can register
+            SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
+                info,
+                ..
+            })) => {
+                // Register our external address. Needs to be done explicitly
+                // for this case, as it's a local address.
+                self.swarm.add_external_address(info.observed_addr);
+                if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
+                    rendezvous::Namespace::from_static("rendezvous"),
+                    self.rendezvous_peer_id,
+                    None,
+                ) {
+                    tracing::error!("Failed to register: {error}");
+                }
+                tracing::info!("Connection established with rendezvous point");
+            }
+
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)
+                | BehaviourEvent::Identify(
+                    identify::Event::Sent { .. } | identify::Event::Pushed { .. },
+                )
+                | BehaviourEvent::Gossipsub(
+                    gossipsub::Event::GossipsubNotSupported { .. }
+                    | gossipsub::Event::Subscribed { .. },
+                )
+                | BehaviourEvent::Rendezvous(rendezvous::client::Event::Registered { .. })
                 | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
                 | BehaviourEvent::TradeOffering(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::TradeResponse(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed { .. }),
+                | BehaviourEvent::TradeResponse(request_response::Event::ResponseSent { .. }),
             )
             | SwarmEvent::Dialing { .. }
             | SwarmEvent::IncomingConnection { .. }

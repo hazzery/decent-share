@@ -233,34 +233,6 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_mdns_discovered(
-        &mut self,
-        list: Vec<(PeerId, Multiaddr)>,
-    ) {
-        for (peer_id, multiaddr) in list {
-            self.swarm
-                .behaviour_mut()
-                .gossipsub
-                .add_explicit_peer(&peer_id);
-
-            self.swarm
-                .behaviour_mut()
-                .kademlia
-                .add_address(&peer_id, multiaddr);
-        }
-    }
-
-    pub(in crate::network::event_loop) fn handle_mdns_expired(
-        &mut self,
-        list: &Vec<(PeerId, Multiaddr)>,
-    ) {
-        for (peer_id, _multiaddr) in list {
-            self.swarm
-                .behaviour_mut()
-                .gossipsub
-                .remove_explicit_peer(peer_id);
-        }
-    }
     #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) async fn handle_gossipsub_message(
         &mut self,
@@ -283,10 +255,10 @@ impl EventLoop {
 
         for registration in registrations {
             for address in registration.record.addresses() {
-                let peer = registration.record.peer_id();
-                tracing::info!(%peer, %address, "Discovered peer");
+                let peer_id = registration.record.peer_id();
+                tracing::info!(%peer_id, %address, "Discovered peer");
 
-                let p2p_suffix = multiaddr::Protocol::P2p(peer);
+                let p2p_suffix = multiaddr::Protocol::P2p(peer_id);
                 let address_with_p2p =
                     if address.ends_with(&Multiaddr::empty().with(p2p_suffix.clone())) {
                         address.clone()
@@ -295,23 +267,23 @@ impl EventLoop {
                     };
 
                 self.swarm.dial(address_with_p2p).unwrap();
+
+                self.swarm
+                    .behaviour_mut()
+                    .gossipsub
+                    .add_explicit_peer(&peer_id);
+
+                self.swarm
+                    .behaviour_mut()
+                    .kademlia
+                    .add_address(&peer_id, address.to_owned());
             }
         }
     }
 
     pub(in crate::network::event_loop) fn handle_connected_to_rendezvous_server(&mut self) {
-        if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
-            rendezvous::Namespace::from_static("rendezvous"),
-            self.rendezvous_peer_id,
-            None,
-        ) {
-            tracing::error!("Failed to register: {error}");
-            return;
-        }
-        tracing::info!("Connection established with rendezvous point");
-
         self.swarm.behaviour_mut().rendezvous.discover(
-            Some(rendezvous::Namespace::new(RENDEZVOUS_NAMESPACE.to_string()).unwrap()),
+            Some(rendezvous::Namespace::from_static(RENDEZVOUS_NAMESPACE)),
             None,
             None,
             self.rendezvous_peer_id,
