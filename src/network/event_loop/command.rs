@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use futures::channel::oneshot;
-use libp2p::PeerId;
+use libp2p::{kad, PeerId};
 
 use super::EventLoop;
 
@@ -9,10 +9,11 @@ use super::EventLoop;
 pub(crate) enum Command {
     RegisterName {
         username: String,
+        status_sender: oneshot::Sender<Result<(), kad::PutRecordError>>,
     },
-    FindUser {
+    FindPeerId {
         username: String,
-        sender: oneshot::Sender<Option<PeerId>>,
+        peer_id_sender: oneshot::Sender<Option<PeerId>>,
     },
     FindPeerUsername {
         peer_id: PeerId,
@@ -39,15 +40,21 @@ pub(crate) enum Command {
     DirectMessage {
         peer_id: PeerId,
         message: String,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
+        error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     },
 }
 
 impl EventLoop {
     pub fn handle_command(&mut self, command: Command) {
         match command {
-            Command::RegisterName { username } => self.handle_register_name(&username),
-            Command::FindUser { username, sender } => self.handle_find_user(&username, sender),
+            Command::RegisterName {
+                username,
+                status_sender,
+            } => self.handle_register_name(&username, status_sender),
+            Command::FindPeerId {
+                username,
+                peer_id_sender,
+            } => self.handle_find_peer_id(&username, peer_id_sender),
             Command::FindPeerUsername {
                 peer_id,
                 username_sender,
@@ -84,9 +91,9 @@ impl EventLoop {
             Command::DirectMessage {
                 peer_id,
                 message,
-                sender,
+                error_sender,
             } => {
-                self.handle_direct_message(&peer_id, message, sender);
+                self.handle_direct_message(&peer_id, message, error_sender);
             }
         }
     }

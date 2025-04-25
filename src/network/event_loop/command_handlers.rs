@@ -8,7 +8,11 @@ use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
 
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_register_name(&mut self, username: &str) {
+    pub(in crate::network::event_loop) fn handle_register_name(
+        &mut self,
+        username: &str,
+        status_sender: oneshot::Sender<Result<(), kad::PutRecordError>>,
+    ) {
         let peer_id_bytes = self.swarm.local_peer_id().to_bytes();
         let username_bytes = username.to_lowercase().into_bytes();
 
@@ -18,11 +22,15 @@ impl EventLoop {
             publisher: None,
             expires: None,
         };
-        self.swarm
+        let query_id = self
+            .swarm
             .behaviour_mut()
             .kademlia
             .put_record(record, kad::Quorum::One)
             .expect("Failed to store record locally");
+
+        self.pending_register_username
+            .insert(query_id, status_sender);
 
         let record = kad::Record {
             key: kad::RecordKey::new(&peer_id_bytes),
@@ -37,14 +45,15 @@ impl EventLoop {
             .expect("Failed to store record locally");
     }
 
-    pub(in crate::network::event_loop) fn handle_find_user(
+    pub(in crate::network::event_loop) fn handle_find_peer_id(
         &mut self,
         username: &str,
-        sender: oneshot::Sender<Option<PeerId>>,
+        peer_id_sender: oneshot::Sender<Option<PeerId>>,
     ) {
         let key = kad::RecordKey::new(&username.to_lowercase().into_bytes());
         let query_id = self.swarm.behaviour_mut().kademlia.get_record(key);
-        self.pending_peer_id_request.insert(query_id, sender);
+        self.pending_peer_id_request
+            .insert(query_id, peer_id_sender);
     }
 
     pub(in crate::network::event_loop) fn handle_find_peer_username(
@@ -73,21 +82,22 @@ impl EventLoop {
                 .expect("Error receiver was dropped");
             return;
         }
+
         let offer = TradeOffer {
             offered_file_name,
             requested_file_name,
         };
-        self.swarm
+        let query_id = self
+            .swarm
             .behaviour_mut()
             .trade_offering
             .send_request(&peer_id, offer.clone());
 
+        self.pending_trade_offer_request
+            .insert(query_id, error_sender);
+
         self.outgoing_trade_offers
             .insert((peer_id, offer), (offered_file_bytes, requested_file_path));
-
-        error_sender
-            .send(Ok(()))
-            .expect("Error receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_respond_trade(
@@ -136,13 +146,14 @@ impl EventLoop {
         &mut self,
         peer_id: &PeerId,
         message: String,
-        sender: oneshot::Sender<Result<(), anyhow::Error>>,
+        error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
         let request_id = self
             .swarm
             .behaviour_mut()
             .direct_messaging
             .send_request(peer_id, DirectMessage(message));
-        self.pending_request_message.insert(request_id, sender);
+        self.pending_request_message
+            .insert(request_id, error_sender);
     }
 }

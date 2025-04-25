@@ -79,7 +79,11 @@ pub(crate) async fn handle_std_in(
                 return;
             };
 
-            network_client.register_username(username.clone()).await;
+            if let Err(error) = network_client.register_username(username.clone()).await {
+                eprintln!("Error registering username: {error:?}");
+            } else {
+                println!("Registration successful");
+            }
         }
         "dm" => {
             let Some(username) = arguments.get(1) else {

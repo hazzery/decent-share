@@ -1,16 +1,13 @@
 use anyhow::anyhow;
 use futures::SinkExt;
 use libp2p::{
-    gossipsub,
+    gossipsub, identify,
     kad::{self, QueryId},
     multiaddr, rendezvous, request_response, Multiaddr, PeerId,
 };
 
 use super::{Event, EventLoop};
-use crate::network::{
-    event_loop::RENDEZVOUS_NAMESPACE, DirectMessage, NoResponse, TradeOffer, TradeResponse,
-    TradeResponseResponse,
-};
+use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
 impl EventLoop {
     #[allow(clippy::unused_self)]
@@ -28,14 +25,14 @@ impl EventLoop {
                     let peer_id = PeerId::from_bytes(&value).ok();
                     peer_id_sender
                         .send(peer_id)
-                        .expect("Receiver not to be dropped");
+                        .expect("Peer ID receiver was dropped");
                 } else if let Some(username_sender) =
                     self.pending_username_request.remove(&query_id)
                 {
                     let username = String::from_utf8(value).map_err(|error| anyhow!(error));
                     username_sender
                         .send(username)
-                        .expect("Receiver not to be dropped");
+                        .expect("Username receiver was dropped");
                 }
             }
             Ok(_) => {}
@@ -43,7 +40,7 @@ impl EventLoop {
                 if let Some(peer_id_sender) = self.pending_peer_id_request.remove(&query_id) {
                     peer_id_sender
                         .send(None)
-                        .expect("Peer ID sender was dropped");
+                        .expect("Peer ID receiver was dropped");
                 } else if let Some(username_sender) =
                     self.pending_username_request.remove(&query_id)
                 {
@@ -59,10 +56,13 @@ impl EventLoop {
     pub(in crate::network::event_loop) fn handle_put_record(
         &mut self,
         record: kad::PutRecordResult,
+        query_id: QueryId,
     ) {
-        match record {
-            Ok(kad::PutRecordOk { .. }) => println!("Successfully stored record!"),
-            Err(error) => eprintln!("Failed to store record: {error:?}"),
+        if let Some(status_sender) = self.pending_register_username.remove(&query_id) {
+            let status = record.map(|_| ());
+            status_sender
+                .send(status)
+                .expect("Status receiver was dropped");
         }
     }
 
@@ -81,19 +81,19 @@ impl EventLoop {
                         message: request.0,
                     })
                     .await
-                    .expect("Event sender not to be dropped");
+                    .expect("Event receiver was dropped");
 
                 self.swarm
                     .behaviour_mut()
                     .direct_messaging
                     .send_response(channel, NoResponse())
-                    .expect("The response to be sent");
+                    .expect("Connection to peer was dropped");
             }
             request_response::Message::Response { request_id, .. } => {
                 let _ = self
                     .pending_request_message
                     .remove(&request_id)
-                    .expect("Message to still be pending.")
+                    .expect("Message was not pending")
                     .send(Ok(()));
             }
         }
@@ -106,9 +106,9 @@ impl EventLoop {
     ) {
         self.pending_request_message
             .remove(&request_id)
-            .expect("Message to still be pending.")
+            .expect("Message was not pending")
             .send(Err(anyhow!(error)))
-            .expect("Direct messaging receiver dropped");
+            .expect("Direct messaging receiver was dropped");
     }
 
     pub(in crate::network::event_loop) async fn handle_trade_offering_message(
@@ -124,7 +124,7 @@ impl EventLoop {
                     .behaviour_mut()
                     .trade_offering
                     .send_response(channel, NoResponse())
-                    .expect("Connection to peer to still be open");
+                    .expect("Connection to peer was dropped");
 
                 self.inbound_trade_offers.insert((peer_id, request.clone()));
 
@@ -135,18 +135,29 @@ impl EventLoop {
                         requested_file_name: request.requested_file_name,
                     })
                     .await
-                    .expect("Event receiver not to be dropped");
+                    .expect("Event receiver was dropped");
             }
-            request_response::Message::Response { .. } => {}
+            request_response::Message::Response { request_id, .. } => {
+                if let Some(status_sender) = self.pending_trade_offer_request.remove(&request_id) {
+                    status_sender
+                        .send(Ok(()))
+                        .expect("Status sender was dropped");
+                }
+            }
         }
     }
 
     #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_trade_offering_outbound_failure(
         &mut self,
-        error: &request_response::OutboundFailure,
+        error: request_response::OutboundFailure,
+        request_id: request_response::OutboundRequestId,
     ) {
-        println!("A trade offer failure has occured: {error:?}");
+        if let Some(status_sender) = self.pending_trade_offer_request.remove(&request_id) {
+            status_sender
+                .send(Err(anyhow!(error)))
+                .expect("Status receiver was dropped");
+        }
     }
 
     pub(in crate::network::event_loop) async fn handle_trade_response_message(
@@ -164,7 +175,6 @@ impl EventLoop {
                 };
                 let entry = self.outgoing_trade_offers.remove(&(peer_id, offer));
                 let Some((offered_file_bytes, requested_file_path)) = entry else {
-                    println!("Received invalid trade response!");
                     return;
                 };
 
@@ -176,7 +186,7 @@ impl EventLoop {
                         was_accepted: request.requested_file_bytes.is_some(),
                     })
                     .await
-                    .expect("Event receiver not to be dropped");
+                    .expect("Event receiver was dropped");
 
                 let mut response: Option<Vec<u8>> = None;
 
@@ -203,7 +213,7 @@ impl EventLoop {
                             offered_file_bytes: response,
                         },
                     )
-                    .expect("Connection to peer to still be open");
+                    .expect("Connection to peer was dropped");
             }
             request_response::Message::Response {
                 response,
@@ -243,7 +253,7 @@ impl EventLoop {
         self.event_sender
             .send(Event::InboundChat { peer_id, message })
             .await
-            .expect("Event sender not to be dropped");
+            .expect("Event receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_rendezvous_discovered(
@@ -283,10 +293,28 @@ impl EventLoop {
 
     pub(in crate::network::event_loop) fn handle_connected_to_rendezvous_server(&mut self) {
         self.swarm.behaviour_mut().rendezvous.discover(
-            Some(rendezvous::Namespace::from_static(RENDEZVOUS_NAMESPACE)),
+            Some(self.rendezvous_namespace.clone()),
             None,
             None,
             self.rendezvous_peer_id,
         );
+    }
+
+    pub(in crate::network::event_loop) fn handle_identify_received(
+        &mut self,
+        info: identify::Info,
+    ) {
+        // once `/identify` did its job, we know our external address and can
+        // register. This needs to be done explicitly for this case, as it's a
+        // local address.
+        self.swarm.add_external_address(info.observed_addr);
+        if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
+            self.rendezvous_namespace.clone(),
+            self.rendezvous_peer_id,
+            None,
+        ) {
+            tracing::error!("Failed to register: {error}");
+        }
+        tracing::info!("Connection established with rendezvous point");
     }
 }

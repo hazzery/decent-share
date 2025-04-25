@@ -31,10 +31,14 @@ pub(crate) struct EventLoop {
     rendezvous_peer_id: PeerId,
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
+    pending_register_username:
+        HashMap<kad::QueryId, oneshot::Sender<Result<(), kad::PutRecordError>>>,
     pending_request_message:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_peer_id_request: HashMap<kad::QueryId, oneshot::Sender<Option<PeerId>>>,
     pending_username_request: HashMap<kad::QueryId, oneshot::Sender<DynResult<String>>>,
+    pending_trade_offer_request:
+        HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<()>>>,
     pending_trade_response_response:
         HashMap<request_response::OutboundRequestId, oneshot::Sender<DynResult<Option<Vec<u8>>>>>,
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
@@ -42,6 +46,7 @@ pub(crate) struct EventLoop {
     gossipsub_topic: gossipsub::IdentTopic,
     discover_tick: tokio::time::Interval,
     cookie: Option<rendezvous::Cookie>,
+    rendezvous_namespace: rendezvous::Namespace,
 }
 
 impl EventLoop {
@@ -57,15 +62,18 @@ impl EventLoop {
             rendezvous_peer_id,
             command_receiver,
             event_sender,
+            pending_register_username: HashMap::default(),
             pending_request_message: HashMap::default(),
             pending_peer_id_request: HashMap::default(),
             pending_username_request: HashMap::default(),
+            pending_trade_offer_request: HashMap::default(),
             pending_trade_response_response: HashMap::default(),
             outgoing_trade_offers: HashMap::default(),
             inbound_trade_offers: HashSet::default(),
             gossipsub_topic,
             discover_tick: tokio::time::interval(Duration::from_secs(30)),
             cookie: None,
+            rendezvous_namespace: rendezvous::Namespace::from_static(RENDEZVOUS_NAMESPACE),
         }
     }
 
@@ -83,7 +91,7 @@ impl EventLoop {
                         .behaviour_mut()
                         .rendezvous
                         .discover(
-                            Some(rendezvous::Namespace::new(RENDEZVOUS_NAMESPACE.to_string()).unwrap()),
+                            Some(self.rendezvous_namespace.clone()),
                             self.cookie.clone(),
                             None,
                             self.rendezvous_peer_id
@@ -106,9 +114,10 @@ impl EventLoop {
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(
                 kad::Event::OutboundQueryProgressed {
                     result: kad::QueryResult::PutRecord(record),
+                    id: query_id,
                     ..
                 },
-            )) => self.handle_put_record(record),
+            )) => self.handle_put_record(record, query_id),
 
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::Message { peer, message, .. },
@@ -125,8 +134,10 @@ impl EventLoop {
             )) => self.handle_trade_offering_message(message, peer).await,
 
             SwarmEvent::Behaviour(BehaviourEvent::TradeOffering(
-                request_response::Event::OutboundFailure { error, .. },
-            )) => self.handle_trade_offering_outbound_failure(&error),
+                request_response::Event::OutboundFailure {
+                    error, request_id, ..
+                },
+            )) => self.handle_trade_offering_outbound_failure(error, request_id),
 
             SwarmEvent::Behaviour(BehaviourEvent::TradeResponse(
                 request_response::Event::Message { peer, message, .. },
@@ -158,23 +169,10 @@ impl EventLoop {
                 },
             )) => self.handle_rendezvous_discovered(registrations, cookie),
 
-            // once `/identify` did its job, we know our external address and can register
             SwarmEvent::Behaviour(BehaviourEvent::Identify(identify::Event::Received {
                 info,
                 ..
-            })) => {
-                // Register our external address. Needs to be done explicitly
-                // for this case, as it's a local address.
-                self.swarm.add_external_address(info.observed_addr);
-                if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
-                    rendezvous::Namespace::from_static("rendezvous"),
-                    self.rendezvous_peer_id,
-                    None,
-                ) {
-                    tracing::error!("Failed to register: {error}");
-                }
-                tracing::info!("Connection established with rendezvous point");
-            }
+            })) => self.handle_identify_received(info),
 
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)

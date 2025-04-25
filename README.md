@@ -6,17 +6,50 @@ peer, and file exchanging functionality. Files must be shared in a one for one
 swapping manor, where to receive someone else's file you must also offer them
 a file of your own.
 
-## Usage
+## Building from source
 
-To run `decent-share`, execute its binary file on the command line:
+To build `decent-share` (and the rendezvous server), run the following in the
+project directory.
 
 ```bash
-./decent-share
+cargo build
 ```
 
-`decent-share` will connect to peers on the same local network using mDNS and
-listen to `stdin` for actions to perform. There are six different actions one
-can perform within `decent-share`.
+## Booting the rendezvous server
+
+To use `decent-share`, it is critical that the rendezvous server is running.
+When a node is booted up, it connects to the rendezvous server in order to
+discover other peers and be discoverable to other peers. Run the rendezvous
+server by executing its binary. Optionally set the value of the `RUST_LOG`
+environment variable to enable logging to stdout.
+
+```bash
+./rendezvous_server
+RUST_LOG=info ./rendezvous_server
+```
+
+## Starting a new peer
+
+Once the rendezvous server is running, you may start up a client node. To do so,
+execute the binary file on the command line. `decent-share` takes a single
+command line argument, `--rendezvous-address`/`-r`, to specify the IPv4 address
+that the rendezvous server is hosted on. This must be input in dotted decimal
+notation. If you are running a node on the same machine as the rendezvous
+server, you may omit this argument as it defaults to `127.0.0.1`.
+
+```bash
+./decent-share --rendezvous-address 198.162.0.1
+```
+
+`decent-share` will connect to peers who have also registered on the rendezvous
+server. The first node to be booted will emit a warning that there are no known
+peers. Without any other peers connected, none of `decent-share`'s features will
+function.
+
+## Usage
+
+Once another peer has connected, `decent-share` will listen to `stdin` for
+actions to perform. There are six different actions one can perform.
 
 * register
 * send
@@ -53,8 +86,8 @@ dm <recipient> <message>
 
 Now we are ready to offer a trade to a peer, we will need the `trade` action.
 When using `trade`, remember the following to help with usage of the action's
-parameters: trade this \<file> found at \<this path> for this \<person>'s
-\<file> and place it at this \<path>.
+parameters: trade this \<file> (found at \<path>) for \<username>'s \<file> and
+place it at \<path>.
 
 ```sh
 trade <offered_file_name> <path_to_source_offered_file> <recipient_username> <requested_file_name> <path_to_place_requested_file>
@@ -62,6 +95,13 @@ trade <offered_file_name> <path_to_source_offered_file> <recipient_username> <re
 
 The recipient of the trade can then respond to this trade using either of the
 `accept` or `decline` actions.
+
+When using `accept`, remember the following to help with usage of the action's
+parameters: accept \<username>'s offer of \<file>, (which should be placed at
+\<path>) for my \<file> (which can be found at \<path>).
+
+Similarly, when using `decline`, remember the following: decline \<username>'s
+offer of \<file> for my \<file>.
 
 ```sh
 accept <offerer_username> <offered_file_name> <path_to_place_offered_file> <requested_file_name> <path_to_source_requested_file>
