@@ -71,10 +71,6 @@ pub(crate) struct NoResponse();
 pub(crate) fn new(
     rendezvous_ip_address: &str,
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), anyhow::Error> {
-    // Create a public/private key pair, either random or based on a seed.
-    let id_keys = identity::Keypair::generate_ed25519();
-    let peer_id = id_keys.public().to_peer_id();
-
     // Set a custom gossipsub configuration
     let gossipsub_config = gossipsub::ConfigBuilder::default()
         .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
@@ -88,7 +84,7 @@ pub(crate) fn new(
         .build()
         .map_err(|msg| TokioError::new(TokioErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
 
-    let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
+    let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
         .with_tcp(
             tcp::Config::default(),
@@ -97,11 +93,9 @@ pub(crate) fn new(
         )?
         .with_quic()
         .with_behaviour(|keypair: &identity::Keypair| {
+            let peer_id = keypair.public().to_peer_id();
             Ok(Behaviour {
-                kademlia: kad::Behaviour::new(
-                    peer_id,
-                    kad::store::MemoryStore::new(keypair.public().to_peer_id()),
-                ),
+                kademlia: kad::Behaviour::new(peer_id, kad::store::MemoryStore::new(peer_id)),
                 trade_offering: request_response::cbor::Behaviour::new(
                     [(StreamProtocol::new("/trade-offer/1"), ProtocolSupport::Full)],
                     request_response::Config::default(),
