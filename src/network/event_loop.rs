@@ -36,7 +36,7 @@ pub(crate) struct EventLoop {
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
     inbound_trade_offers: HashSet<(PeerId, TradeOffer)>,
     gossipsub_topic: gossipsub::IdentTopic,
-    peer_counter: u8,
+    has_registered_username: bool,
     username: String,
 }
 
@@ -59,7 +59,7 @@ impl EventLoop {
             outgoing_trade_offers: HashMap::default(),
             inbound_trade_offers: HashSet::default(),
             gossipsub_topic,
-            peer_counter: 0,
+            has_registered_username: false,
             username,
         }
     }
@@ -93,6 +93,21 @@ impl EventLoop {
                     ..
                 },
             )) => self.handle_put_record(record),
+
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(kad::Event::RoutingUpdated {
+                ..
+            })) => {
+                if !self.has_registered_username {
+                    self.event_sender
+                        .send(Event::RegistrationRequest {
+                            username: self.username.clone(),
+                        })
+                        .await
+                        .expect("Event receiver was dropped");
+                    println!("username is being registered");
+                    self.has_registered_username = true;
+                }
+            }
 
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::Message { peer, message, .. },
@@ -136,18 +151,6 @@ impl EventLoop {
                 ..
             })) => self.handle_gossipsub_message(&message, peer_id).await,
 
-            SwarmEvent::NewListenAddr { .. } => {
-                self.peer_counter += 1;
-                if self.peer_counter == 4 {
-                    self.event_sender
-                        .send(Event::RegistrationRequest {
-                            username: self.username.clone(),
-                        })
-                        .await
-                        .expect("Event receiver was dropped");
-                }
-            }
-
             SwarmEvent::Behaviour(
                 BehaviourEvent::Kademlia(_)
                 | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
@@ -156,6 +159,7 @@ impl EventLoop {
                 | BehaviourEvent::Gossipsub(gossipsub::Event::Subscribed { .. }),
             )
             | SwarmEvent::Dialing { .. }
+            | SwarmEvent::NewListenAddr { .. }
             | SwarmEvent::IncomingConnection { .. }
             | SwarmEvent::ConnectionClosed { .. }
             | SwarmEvent::IncomingConnectionError { .. }
