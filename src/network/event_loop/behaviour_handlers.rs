@@ -58,6 +58,7 @@ impl EventLoop {
         query_id: QueryId,
     ) {
         if let Some(status_sender) = self.pending_register_username.remove(&query_id) {
+            self.has_registered_username = record.is_ok();
             let status = record.map(|_| ());
             status_sender
                 .send(status)
