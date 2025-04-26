@@ -114,9 +114,9 @@ impl EventLoop {
         };
         if !self.inbound_trade_offers.remove(&(peer_id, offer)) {
             if let Some(offered_bytes_sender) = offered_bytes_sender {
-                let _ = offered_bytes_sender.send(Err(anyhow!(format!(
+                offered_bytes_sender.send(Err(anyhow!(format!(
                     "No valid trade with this user for {offered_file_name} and {requested_file_name}"
-                ))));
+                )))).expect("Offered bytes receiver was dropped");
             }
             return;
         }
