@@ -317,4 +317,16 @@ impl EventLoop {
         }
         tracing::info!("Connection established with rendezvous point");
     }
+
+    pub(in crate::network::event_loop) async fn handle_kademlia_routing_updated(&mut self) {
+        if !self.has_registered_username {
+            self.event_sender
+                .send(Event::RegistrationRequest {
+                    username: self.username.clone(),
+                })
+                .await
+                .expect("Event receiver was dropped");
+            self.has_registered_username = true;
+        }
+    }
 }

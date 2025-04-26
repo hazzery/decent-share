@@ -126,18 +126,7 @@ impl EventLoop {
 
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(kad::Event::RoutingUpdated {
                 ..
-            })) => {
-                if !self.has_registered_username {
-                    self.event_sender
-                        .send(Event::RegistrationRequest {
-                            username: self.username.clone(),
-                        })
-                        .await
-                        .expect("Event receiver was dropped");
-                    println!("username is being registered");
-                    self.has_registered_username = true;
-                }
-            }
+            })) => self.handle_kademlia_routing_updated().await,
 
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::Message { peer, message, .. },
