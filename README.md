@@ -68,7 +68,7 @@ register <username>
 ```
 
 Once you are registered, you can introduce yourself to other users with `send`.
-Messages sent using the `send` action are broadcast to all active users of
+Chat messages sent using the `send` action are broadcast to all active users of
 `decent-share`. Here you can tell peers what files you have to offer and ask
 others what they have available.
 
