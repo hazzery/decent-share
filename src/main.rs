@@ -57,7 +57,7 @@ async fn main() -> Result<(), anyhow::Error> {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "libp2p file sharing example")]
+#[command(name = "decent-share: File exchange")]
 struct Arguments {
     /// A username to register with for user identification.
     #[arg(long, short)]
