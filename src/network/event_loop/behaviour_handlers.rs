@@ -10,7 +10,6 @@ use super::{Event, EventLoop};
 use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
 impl EventLoop {
-    #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_get_record(
         &mut self,
         record: kad::GetRecordResult,
