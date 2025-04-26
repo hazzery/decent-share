@@ -214,7 +214,7 @@ pub async fn handle_network_event(event: Option<Event>, network_client: &mut Cli
         }
         Event::RegistrationRequest { username } => {
             if let Err(error) = network_client.register_username(username.clone()).await {
-                println!("Failed to register username: {error:?}");
+                println!("Failed to register username, will try again soon: {error:?}");
             } else {
                 println!("successfully registered as {username}");
             }
