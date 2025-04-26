@@ -2,11 +2,7 @@ mod client;
 mod event_loop;
 mod username_store;
 
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    sync::Arc,
-    time::Duration,
-};
+use std::{hash::Hash, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, Stream};
 use libp2p::{
@@ -78,16 +74,13 @@ pub(crate) fn new(
 
     // Set a custom gossipsub configuration
     let gossipsub_config = gossipsub::ConfigBuilder::default()
-        .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
-        .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message
-        // signing)
-        .message_id_fn(|message: &gossipsub::Message| {
-            let mut s = DefaultHasher::new();
-            message.data.hash(&mut s);
-            gossipsub::MessageId::from(s.finish().to_string())
-        }) // content-address messages. No two messages of the same content will be propagated.
+        // This is set to aid debugging by not cluttering the log space
+        .heartbeat_interval(Duration::from_secs(10))
+        // This sets the kind of message validation. The default is Strict (enforce message signing)
+        .validation_mode(gossipsub::ValidationMode::Strict)
         .build()
-        .map_err(|msg| TokioError::new(TokioErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
+        // Temporary hack because `build` does not return a proper `std::error::Error`.
+        .map_err(|msg| TokioError::new(TokioErrorKind::Other, msg))?;
 
     let mut swarm = libp2p::SwarmBuilder::with_existing_identity(id_keys)
         .with_tokio()
