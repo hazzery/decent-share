@@ -95,7 +95,7 @@ pub(crate) async fn handle_std_in(
                 return;
             };
             if let Err(error) = network_client
-                .direct_message(username.clone(), message.clone())
+                .direct_message(username.to_owned(), message.to_owned())
                 .await
             {
                 eprintln!("Error sending direct message: {error:?}");
@@ -150,9 +150,9 @@ pub(crate) async fn handle_std_in(
             };
             if let Err(error) = network_client
                 .decline_trade(
-                    username.to_string(),
-                    offered_file_name.to_string(),
-                    requested_file_name.to_string(),
+                    username.to_owned(),
+                    offered_file_name.to_owned(),
+                    requested_file_name.to_owned(),
                 )
                 .await
             {
