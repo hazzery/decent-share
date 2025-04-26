@@ -1,3 +1,5 @@
+use libp2p::gossipsub;
+
 use crate::{
     action::{handle_accept_trade, handle_send, handle_trade},
     network::{Client, Event},
@@ -36,7 +38,17 @@ pub(crate) async fn handle_std_in(
                 println!("{SEND_USAGE}");
                 return;
             };
-            handle_send(message, network_client).await;
+            if let Err(error) = handle_send(message, network_client).await {
+                match error {
+                    gossipsub::PublishError::InsufficientPeers => {
+                        eprintln!("No peers are connected, unable to publish chat!");
+                    }
+                    gossipsub::PublishError::MessageTooLarge => {
+                        eprintln!("Message was too large. Please use less characters");
+                    }
+                    _ => eprintln!("Error sending chat: {error:?}"),
+                }
+            }
         }
         "trade" => {
             let Some(offered_file_name) = arguments.get(1) else {

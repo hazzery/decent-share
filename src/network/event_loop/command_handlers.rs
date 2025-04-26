@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use futures::channel::oneshot;
-use libp2p::{kad, PeerId};
+use libp2p::{gossipsub, kad, PeerId};
 
 use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
@@ -134,12 +134,21 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_send_message(&mut self, message: &str) {
-        self.swarm
+    pub(in crate::network::event_loop) fn handle_send_message(
+        &mut self,
+        message: &str,
+        status_sender: oneshot::Sender<Result<(), gossipsub::PublishError>>,
+    ) {
+        let status = self
+            .swarm
             .behaviour_mut()
             .gossipsub
             .publish(self.gossipsub_topic.clone(), message.as_bytes())
-            .expect("Message Publish error!");
+            .map(|_| ());
+
+        status_sender
+            .send(status)
+            .expect("Status receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_direct_message(

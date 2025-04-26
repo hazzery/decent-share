@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use futures::channel::oneshot;
-use libp2p::{kad, PeerId};
+use libp2p::{gossipsub, kad, PeerId};
 
 use super::EventLoop;
 
@@ -36,6 +36,7 @@ pub(crate) enum Command {
     },
     SendMessage {
         message: String,
+        status_sender: oneshot::Sender<Result<(), gossipsub::PublishError>>,
     },
     DirectMessage {
         peer_id: PeerId,
@@ -87,7 +88,10 @@ impl EventLoop {
                 requested_file_bytes,
                 offered_bytes_sender,
             ),
-            Command::SendMessage { message } => self.handle_send_message(&message),
+            Command::SendMessage {
+                message,
+                status_sender,
+            } => self.handle_send_message(&message, status_sender),
             Command::DirectMessage {
                 peer_id,
                 message,
