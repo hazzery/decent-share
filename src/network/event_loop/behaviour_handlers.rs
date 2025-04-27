@@ -292,10 +292,18 @@ impl EventLoop {
     ) {
         self.cookie.replace(cookie);
 
+        if registrations.len() < 2 {
+            return;
+        }
+
         for registration in registrations {
+            let peer_id = registration.record.peer_id();
+            if peer_id == *self.swarm.local_peer_id() {
+                return;
+            }
+
             for address in registration.record.addresses() {
-                let peer_id = registration.record.peer_id();
-                tracing::info!(%peer_id, %address, "Discovered peer");
+                tracing::info!(%peer_id, %address, "Discovered peer from rendezvous point");
 
                 let p2p_suffix = multiaddr::Protocol::P2p(peer_id);
                 let address_with_p2p =
@@ -309,14 +317,14 @@ impl EventLoop {
 
                 self.swarm
                     .behaviour_mut()
-                    .gossipsub
-                    .add_explicit_peer(&peer_id);
-
-                self.swarm
-                    .behaviour_mut()
                     .kademlia
                     .add_address(&peer_id, address.to_owned());
             }
+
+            self.swarm
+                .behaviour_mut()
+                .gossipsub
+                .add_explicit_peer(&peer_id);
         }
     }
 
