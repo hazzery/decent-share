@@ -157,6 +157,15 @@ impl EventLoop {
         message: String,
         error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
+        if peer_id == self.swarm.local_peer_id() {
+            error_sender
+                .send(Err(anyhow!(
+                    "Sending direct messages to yourself is forbidden"
+                )))
+                .expect("Error receiver was dropped");
+            return;
+        }
+
         let request_id = self
             .swarm
             .behaviour_mut()
