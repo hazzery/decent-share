@@ -2,11 +2,15 @@ use std::path::PathBuf;
 use std::str::FromStr;
 
 use anyhow::bail;
+use libp2p::gossipsub;
 
 use crate::network::Client;
 
-pub(crate) async fn handle_send(message: &str, network_client: &mut Client) {
-    network_client.send_message(message.to_string()).await;
+pub(crate) async fn handle_send(
+    message: &str,
+    network_client: &mut Client,
+) -> Result<(), gossipsub::PublishError> {
+    network_client.send_message(message.to_string()).await
 }
 pub(crate) async fn handle_trade(
     offered_file_name: &str,

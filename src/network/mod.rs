@@ -2,15 +2,11 @@ mod client;
 mod event_loop;
 mod username_store;
 
-use std::{
-    hash::{DefaultHasher, Hash, Hasher},
-    sync::Arc,
-    time::Duration,
-};
+use std::{hash::Hash, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, Stream};
 use libp2p::{
-    gossipsub, identify, identity, kad, noise, rendezvous,
+    gossipsub, identify, identity, kad, mdns, noise, rendezvous,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
     tcp, yamux, Multiaddr, PeerId, StreamProtocol,
@@ -33,6 +29,7 @@ struct Behaviour {
     gossipsub: gossipsub::Behaviour,
     rendezvous: rendezvous::client::Behaviour,
     identify: identify::Behaviour,
+    mdns: mdns::tokio::Behaviour,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -69,20 +66,18 @@ pub(crate) struct NoResponse();
 ///
 /// - The network task driving the network itself.
 pub(crate) fn new(
+    username: String,
     rendezvous_ip_address: &str,
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), anyhow::Error> {
     // Set a custom gossipsub configuration
     let gossipsub_config = gossipsub::ConfigBuilder::default()
-        .heartbeat_interval(Duration::from_secs(10)) // This is set to aid debugging by not cluttering the log space
-        .validation_mode(gossipsub::ValidationMode::Strict) // This sets the kind of message validation. The default is Strict (enforce message
-        // signing)
-        .message_id_fn(|message: &gossipsub::Message| {
-            let mut s = DefaultHasher::new();
-            message.data.hash(&mut s);
-            gossipsub::MessageId::from(s.finish().to_string())
-        }) // content-address messages. No two messages of the same content will be propagated.
+        // This is set to aid debugging by not cluttering the log space
+        .heartbeat_interval(Duration::from_secs(10))
+        // This sets the kind of message validation. The default is Strict (enforce message signing)
+        .validation_mode(gossipsub::ValidationMode::Strict)
         .build()
-        .map_err(|msg| TokioError::new(TokioErrorKind::Other, msg))?; // Temporary hack because `build` does not return a proper `std::error::Error`.
+        // Temporary hack because `build` does not return a proper `std::error::Error`.
+        .map_err(|msg| TokioError::new(TokioErrorKind::Other, msg))?;
 
     let mut swarm = libp2p::SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -123,6 +118,10 @@ pub(crate) fn new(
                     "rendezvous-identify/1.0.0".to_string(),
                     keypair.public(),
                 )),
+                mdns: mdns::tokio::Behaviour::new(
+                    mdns::Config::default(),
+                    keypair.public().to_peer_id(),
+                )?,
             })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
@@ -160,6 +159,7 @@ pub(crate) fn new(
             command_receiver,
             event_sender,
             topic,
+            username,
             rendezvous_peer_id,
         ),
     ))

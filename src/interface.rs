@@ -1,3 +1,5 @@
+use libp2p::gossipsub;
+
 use crate::{
     action::{handle_accept_trade, handle_send, handle_trade},
     network::{Client, Event},
@@ -36,7 +38,17 @@ pub(crate) async fn handle_std_in(
                 println!("{SEND_USAGE}");
                 return;
             };
-            handle_send(message, network_client).await;
+            if let Err(error) = handle_send(message, network_client).await {
+                match error {
+                    gossipsub::PublishError::InsufficientPeers => {
+                        eprintln!("No peers are connected, unable to publish chat!");
+                    }
+                    gossipsub::PublishError::MessageTooLarge => {
+                        eprintln!("Message was too large. Please use less characters");
+                    }
+                    _ => eprintln!("Error sending chat: {error:?}"),
+                }
+            }
         }
         "trade" => {
             let Some(offered_file_name) = arguments.get(1) else {
@@ -73,18 +85,6 @@ pub(crate) async fn handle_std_in(
                 eprintln!("Error offering trade: {error:?}");
             }
         }
-        "register" => {
-            let Some(username) = arguments.get(1) else {
-                println!("Missing username");
-                return;
-            };
-
-            if let Err(error) = network_client.register_username(username.clone()).await {
-                eprintln!("Error registering username: {error:?}");
-            } else {
-                println!("Registration successful");
-            }
-        }
         "dm" => {
             let Some(username) = arguments.get(1) else {
                 println!("{DM_USAGE}");
@@ -95,7 +95,7 @@ pub(crate) async fn handle_std_in(
                 return;
             };
             if let Err(error) = network_client
-                .direct_message(username.clone(), message.clone())
+                .direct_message(username.to_owned(), message.to_owned())
                 .await
             {
                 eprintln!("Error sending direct message: {error:?}");
@@ -150,9 +150,9 @@ pub(crate) async fn handle_std_in(
             };
             if let Err(error) = network_client
                 .decline_trade(
-                    username.to_string(),
-                    offered_file_name.to_string(),
-                    requested_file_name.to_string(),
+                    username.to_owned(),
+                    offered_file_name.to_owned(),
+                    requested_file_name.to_owned(),
                 )
                 .await
             {
@@ -211,6 +211,13 @@ pub async fn handle_network_event(event: Option<Event>, network_client: &mut Cli
                 Err(error) => println!("Error fetching username: {error:?}"),
             }
             println!("{message}");
+        }
+        Event::RegistrationRequest { username } => {
+            if let Err(error) = network_client.register_username(username.clone()).await {
+                println!("Failed to register username, will try again soon: {error:?}");
+            } else {
+                println!("successfully registered as {username}");
+            }
         }
     }
 }

@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::anyhow;
 use futures::channel::oneshot;
-use libp2p::{kad, PeerId};
+use libp2p::{gossipsub, kad, PeerId};
 
 use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
@@ -78,7 +78,9 @@ impl EventLoop {
     ) {
         if &peer_id == self.swarm.local_peer_id() {
             error_sender
-                .send(Err(anyhow!("May not send trade to yourself")))
+                .send(Err(anyhow!(
+                    "Sending trade offers to yourself is forbidden"
+                )))
                 .expect("Error receiver was dropped");
             return;
         }
@@ -114,9 +116,9 @@ impl EventLoop {
         };
         if !self.inbound_trade_offers.remove(&(peer_id, offer)) {
             if let Some(offered_bytes_sender) = offered_bytes_sender {
-                let _ = offered_bytes_sender.send(Err(anyhow!(format!(
+                offered_bytes_sender.send(Err(anyhow!(format!(
                     "No valid trade with this user for {offered_file_name} and {requested_file_name}"
-                ))));
+                )))).expect("Offered bytes receiver was dropped");
             }
             return;
         }
@@ -134,12 +136,21 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_send_message(&mut self, message: &str) {
-        self.swarm
+    pub(in crate::network::event_loop) fn handle_send_message(
+        &mut self,
+        message: &str,
+        status_sender: oneshot::Sender<Result<(), gossipsub::PublishError>>,
+    ) {
+        let status = self
+            .swarm
             .behaviour_mut()
             .gossipsub
             .publish(self.gossipsub_topic.clone(), message.as_bytes())
-            .expect("Message Publish error!");
+            .map(|_| ());
+
+        status_sender
+            .send(status)
+            .expect("Status receiver was dropped");
     }
 
     pub(in crate::network::event_loop) fn handle_direct_message(
@@ -148,6 +159,15 @@ impl EventLoop {
         message: String,
         error_sender: oneshot::Sender<Result<(), anyhow::Error>>,
     ) {
+        if peer_id == self.swarm.local_peer_id() {
+            error_sender
+                .send(Err(anyhow!(
+                    "Sending direct messages to yourself is forbidden"
+                )))
+                .expect("Error receiver was dropped");
+            return;
+        }
+
         let request_id = self
             .swarm
             .behaviour_mut()
