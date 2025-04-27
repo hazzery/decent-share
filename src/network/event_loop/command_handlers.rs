@@ -78,7 +78,9 @@ impl EventLoop {
     ) {
         if &peer_id == self.swarm.local_peer_id() {
             error_sender
-                .send(Err(anyhow!("May not send trade to yourself")))
+                .send(Err(anyhow!(
+                    "Sending trade offers to yourself is forbidden"
+                )))
                 .expect("Error receiver was dropped");
             return;
         }
