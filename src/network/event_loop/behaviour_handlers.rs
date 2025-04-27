@@ -9,6 +9,7 @@ use libp2p::{
 use super::{Event, EventLoop};
 use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
+/// Handler functions for inbound network events
 impl EventLoop {
     pub(in crate::network::event_loop) fn handle_get_record(
         &mut self,
@@ -117,6 +118,7 @@ impl EventLoop {
         peer_id: PeerId,
     ) {
         match message {
+            // We have received a trade offer from another peer
             request_response::Message::Request {
                 request, channel, ..
             } => {
@@ -137,6 +139,8 @@ impl EventLoop {
                     .await
                     .expect("Event receiver was dropped");
             }
+
+            // Another peer has received our trade offer
             request_response::Message::Response { request_id, .. } => {
                 if let Some(status_sender) = self.pending_trade_offer_request.remove(&request_id) {
                     status_sender
@@ -166,6 +170,7 @@ impl EventLoop {
         peer_id: PeerId,
     ) {
         match message {
+            // Another peer has responded to a trade offer we made
             request_response::Message::Request {
                 request, channel, ..
             } => {
@@ -215,6 +220,9 @@ impl EventLoop {
                     )
                     .expect("Connection to peer was dropped");
             }
+
+            // We responded to another peer's trade, and they have delivered
+            // the file they offered
             request_response::Message::Response {
                 response,
                 request_id,

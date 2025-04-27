@@ -7,8 +7,10 @@ use libp2p::{gossipsub, kad, PeerId};
 use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
 
+/// Handler functions for Commands from the main thread. These perform outbound
+/// network requests/queries as instructed by the user.
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_register_name(
+    pub(in crate::network::event_loop) fn handle_register_username(
         &mut self,
         username: &str,
         status_sender: oneshot::Sender<Result<(), kad::PutRecordError>>,
@@ -67,7 +69,7 @@ impl EventLoop {
             .insert(query_id, username_sender);
     }
 
-    pub(in crate::network::event_loop) fn handle_make_offer(
+    pub(in crate::network::event_loop) fn handle_make_trade_offer(
         &mut self,
         offered_file_name: String,
         offered_file_bytes: Vec<u8>,
@@ -136,7 +138,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_send_message(
+    pub(in crate::network::event_loop) fn handle_send_chat_message(
         &mut self,
         message: &str,
         status_sender: oneshot::Sender<Result<(), gossipsub::PublishError>>,

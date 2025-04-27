@@ -92,6 +92,8 @@ impl EventLoop {
                     None => return,
                 },
                 _ = self.discover_tick.tick(), if self.rendezvous_peer_id.is_some() && self.cookie.is_some() => {
+                    // If a rendezvous server was specified, connect to it on a regular interval to
+                    // discover new peers.
                     self.swarm
                         .behaviour_mut()
                         .rendezvous
@@ -173,7 +175,7 @@ impl EventLoop {
             })) => self.handle_gossipsub_message(&message, peer_id).await,
 
             SwarmEvent::ConnectionEstablished { peer_id, .. }
-                if  Some(peer_id) == self.rendezvous_peer_id =>
+                if Some(peer_id) == self.rendezvous_peer_id =>
             {
                 self.handle_connected_to_rendezvous_server();
             }
