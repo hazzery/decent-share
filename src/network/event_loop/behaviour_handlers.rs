@@ -9,12 +9,9 @@ use libp2p::{
 use super::{Event, EventLoop};
 use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
+/// Handler functions for inbound network events
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_get_record(
-        &mut self,
-        record: kad::GetRecordResult,
-        query_id: QueryId,
-    ) {
+    pub(super) fn handle_get_record(&mut self, record: kad::GetRecordResult, query_id: QueryId) {
         match record {
             Ok(kad::GetRecordOk::FoundRecord(kad::PeerRecord {
                 record: kad::Record { value, .. },
@@ -52,7 +49,7 @@ impl EventLoop {
     }
 
     #[allow(clippy::unused_self)]
-    pub(in crate::network::event_loop) fn handle_put_record(
+    pub(super) fn handle_put_record(
         &mut self,
         record: kad::PutRecordResult,
         query_id: QueryId,
@@ -66,7 +63,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) async fn handle_direct_messaging_message(
+    pub(super) async fn handle_direct_messaging_message(
         &mut self,
         message: request_response::Message<DirectMessage, NoResponse>,
         peer_id: PeerId,
@@ -99,7 +96,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_direct_messaging_outbound_failure(
+    pub(super) fn handle_direct_messaging_outbound_failure(
         &mut self,
         request_id: request_response::OutboundRequestId,
         error: request_response::OutboundFailure,
@@ -111,12 +108,13 @@ impl EventLoop {
             .expect("Direct messaging receiver was dropped");
     }
 
-    pub(in crate::network::event_loop) async fn handle_trade_offering_message(
+    pub(super) async fn handle_trade_offering_message(
         &mut self,
         message: request_response::Message<TradeOffer, NoResponse>,
         peer_id: PeerId,
     ) {
         match message {
+            // We have received a trade offer from another peer
             request_response::Message::Request {
                 request, channel, ..
             } => {
@@ -137,6 +135,8 @@ impl EventLoop {
                     .await
                     .expect("Event receiver was dropped");
             }
+
+            // Another peer has received our trade offer
             request_response::Message::Response { request_id, .. } => {
                 if let Some(status_sender) = self.pending_trade_offer_request.remove(&request_id) {
                     status_sender
@@ -148,7 +148,7 @@ impl EventLoop {
     }
 
     #[allow(clippy::unused_self)]
-    pub(in crate::network::event_loop) fn handle_trade_offering_outbound_failure(
+    pub(super) fn handle_trade_offering_outbound_failure(
         &mut self,
         error: request_response::OutboundFailure,
         request_id: request_response::OutboundRequestId,
@@ -160,12 +160,13 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) async fn handle_trade_response_message(
+    pub(super) async fn handle_trade_response_message(
         &mut self,
         message: request_response::Message<TradeResponse, TradeResponseResponse>,
         peer_id: PeerId,
     ) {
         match message {
+            // Another peer has responded to a trade offer we made
             request_response::Message::Request {
                 request, channel, ..
             } => {
@@ -215,6 +216,9 @@ impl EventLoop {
                     )
                     .expect("Connection to peer was dropped");
             }
+
+            // We responded to another peer's trade, and they have delivered
+            // the file they offered
             request_response::Message::Response {
                 response,
                 request_id,
@@ -230,7 +234,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_trade_response_outbound_failure(
+    pub(super) fn handle_trade_response_outbound_failure(
         &mut self,
         request_id: request_response::OutboundRequestId,
         error: request_response::OutboundFailure,
@@ -243,7 +247,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_mdns_discovered(
+    pub(super) fn handle_mdns_discovered(
         &mut self,
         list: Vec<(PeerId, Multiaddr)>,
     ) {
@@ -260,7 +264,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_mdns_expired(
+    pub(super) fn handle_mdns_expired(
         &mut self,
         list: &Vec<(PeerId, Multiaddr)>,
     ) {
@@ -273,7 +277,7 @@ impl EventLoop {
     }
 
     #[allow(clippy::unused_self)]
-    pub(in crate::network::event_loop) async fn handle_gossipsub_message(
+    pub(super) async fn handle_gossipsub_message(
         &mut self,
         message: &gossipsub::Message,
         peer_id: PeerId,
@@ -285,7 +289,7 @@ impl EventLoop {
             .expect("Event receiver was dropped");
     }
 
-    pub(in crate::network::event_loop) fn handle_rendezvous_discovered(
+    pub(super) fn handle_rendezvous_discovered(
         &mut self,
         registrations: Vec<rendezvous::Registration>,
         cookie: rendezvous::Cookie,
@@ -328,7 +332,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_connected_to_rendezvous_server(&mut self) {
+    pub(super) fn handle_connected_to_rendezvous_server(&mut self) {
         self.swarm.behaviour_mut().rendezvous.discover(
             Some(self.rendezvous_namespace.clone()),
             None,
@@ -337,7 +341,7 @@ impl EventLoop {
         );
     }
 
-    pub(in crate::network::event_loop) fn handle_identify_received(
+    pub(super) fn handle_identify_received(
         &mut self,
         info: identify::Info,
     ) {
@@ -361,7 +365,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) async fn handle_kademlia_routing_updated(&mut self) {
+    pub(super) async fn handle_kademlia_routing_updated(&mut self) {
         if !self.has_registered_username {
             self.event_sender
                 .send(Event::RegistrationRequest {

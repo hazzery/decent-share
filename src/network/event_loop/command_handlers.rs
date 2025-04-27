@@ -7,8 +7,10 @@ use libp2p::{gossipsub, kad, PeerId};
 use super::{DirectMessage, EventLoop, TradeResponse};
 use crate::network::TradeOffer;
 
+/// Handler functions for Commands from the main thread. These perform outbound
+/// network requests/queries as instructed by the user.
 impl EventLoop {
-    pub(in crate::network::event_loop) fn handle_register_name(
+    pub(super) fn handle_register_username(
         &mut self,
         username: &str,
         status_sender: oneshot::Sender<Result<(), kad::PutRecordError>>,
@@ -45,7 +47,7 @@ impl EventLoop {
             .expect("Failed to store record locally");
     }
 
-    pub(in crate::network::event_loop) fn handle_find_peer_id(
+    pub(super) fn handle_find_peer_id(
         &mut self,
         username: &str,
         peer_id_sender: oneshot::Sender<Option<PeerId>>,
@@ -56,7 +58,7 @@ impl EventLoop {
             .insert(query_id, peer_id_sender);
     }
 
-    pub(in crate::network::event_loop) fn handle_find_peer_username(
+    pub(super) fn handle_find_peer_username(
         &mut self,
         peer_id: PeerId,
         username_sender: oneshot::Sender<Result<String, anyhow::Error>>,
@@ -67,7 +69,7 @@ impl EventLoop {
             .insert(query_id, username_sender);
     }
 
-    pub(in crate::network::event_loop) fn handle_make_offer(
+    pub(super) fn handle_make_trade_offer(
         &mut self,
         offered_file_name: String,
         offered_file_bytes: Vec<u8>,
@@ -102,7 +104,7 @@ impl EventLoop {
             .insert((peer_id, offer), (offered_file_bytes, requested_file_path));
     }
 
-    pub(in crate::network::event_loop) fn handle_respond_trade(
+    pub(super) fn handle_respond_trade(
         &mut self,
         peer_id: PeerId,
         requested_file_name: String,
@@ -136,7 +138,7 @@ impl EventLoop {
         }
     }
 
-    pub(in crate::network::event_loop) fn handle_send_message(
+    pub(super) fn handle_send_chat_message(
         &mut self,
         message: &str,
         status_sender: oneshot::Sender<Result<(), gossipsub::PublishError>>,
@@ -153,7 +155,7 @@ impl EventLoop {
             .expect("Status receiver was dropped");
     }
 
-    pub(in crate::network::event_loop) fn handle_direct_message(
+    pub(super) fn handle_direct_message(
         &mut self,
         peer_id: &PeerId,
         message: String,

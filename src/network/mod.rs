@@ -127,14 +127,17 @@ pub(crate) fn new(
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
         .build();
 
+    // Set the DHT to serve records to incoming queries
     swarm
         .behaviour_mut()
         .kademlia
         .set_mode(Some(kad::Mode::Server));
 
+    // Initialise inter thread communication
     let (command_sender, command_receiver) = mpsc::channel(0);
     let (event_sender, event_receiver) = mpsc::channel(0);
 
+    // Globbal chat room
     let topic = gossipsub::IdentTopic::new("chat-room");
     swarm.behaviour_mut().gossipsub.subscribe(&topic)?;
 
@@ -142,6 +145,7 @@ pub(crate) fn new(
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
+    // Connect to rendezvous server is specified on command line
     let mut rendezvous_peer_id = None;
     if let Some(rendezvous_ip_address) = rendezvous_ip_address {
         rendezvous_peer_id = Some(RENDEZVOUS_POINT_PEER_ID.parse()?);

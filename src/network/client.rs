@@ -20,6 +20,8 @@ pub(crate) struct Client {
 }
 
 impl Client {
+    /// Search the DHT for the peer ID associated with a given username if we
+    /// don't already have it cached.
     pub(crate) async fn get_peer_id(&mut self, username: String) -> Option<PeerId> {
         let mut peer_id = self
             .username_store
@@ -34,6 +36,8 @@ impl Client {
         peer_id
     }
 
+    /// Search the DHT for the username associated with a given peeer ID if we
+    /// don't already have it cached.
     pub(crate) async fn get_username(&mut self, peer_id: PeerId) -> Result<String, anyhow::Error> {
         let username = self
             .username_store
@@ -49,6 +53,9 @@ impl Client {
     }
 }
 
+/// Send messages to the network thread in the form of `Command` enum values
+/// This allows the main thread to remain responsive to the user interface
+/// while the network thread handles networking.
 impl Client {
     pub(crate) async fn offer_trade(
         &mut self,
@@ -65,7 +72,7 @@ impl Client {
         let (error_sender, error_receiver) = oneshot::channel();
 
         self.command_sender
-            .send(Command::MakeOffer {
+            .send(Command::MakeTradeOffer {
                 offered_file_name,
                 offered_file_bytes,
                 peer_id,
@@ -91,6 +98,7 @@ impl Client {
         };
 
         let (offered_bytes_sender, offered_bytes_receiver) = oneshot::channel();
+
         self.command_sender
             .send(Command::RespondTrade {
                 peer_id,
@@ -121,6 +129,7 @@ impl Client {
         let Some(peer_id) = self.get_peer_id(username.clone()).await else {
             bail!("'{username}' is not a registered user");
         };
+
         self.command_sender
             .send(Command::RespondTrade {
                 peer_id,
@@ -131,6 +140,7 @@ impl Client {
             })
             .await
             .expect("Command receiver was dropped");
+
         Ok(())
     }
 
@@ -141,7 +151,7 @@ impl Client {
         let (status_sender, status_receiver) = oneshot::channel();
 
         self.command_sender
-            .send(Command::RegisterName {
+            .send(Command::RegisterUsername {
                 username,
                 status_sender,
             })
@@ -206,7 +216,7 @@ impl Client {
         let (status_sender, status_receiver) = oneshot::channel();
 
         self.command_sender
-            .send(Command::SendMessage {
+            .send(Command::SendChatMessage {
                 message,
                 status_sender,
             })
@@ -221,11 +231,11 @@ impl Client {
         username: String,
         message: String,
     ) -> Result<(), anyhow::Error> {
-        let (error_sender, error_receiver) = oneshot::channel();
-
         let Some(peer_id) = self.get_peer_id(username.clone()).await else {
             bail!("'{username}' is not a registered user");
         };
+
+        let (error_sender, error_receiver) = oneshot::channel();
 
         self.command_sender
             .send(Command::DirectMessage {
@@ -236,6 +246,6 @@ impl Client {
             .await
             .expect("Command receiver was dropped");
 
-        error_receiver.await.expect("Error receiver was dropped")
+        error_receiver.await.expect("Error sender was dropped")
     }
 }

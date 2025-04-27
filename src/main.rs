@@ -31,12 +31,9 @@ use interface::{handle_network_event, handle_std_in};
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
+    // Subscribe to the logging output by libp2p
     let _ = tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::builder()
-                .with_default_directive(tracing_subscriber::filter::LevelFilter::WARN.into())
-                .from_env_lossy(),
-        )
+        .with_env_filter(EnvFilter::default())
         .try_init();
 
     let arguments = Arguments::parse();
@@ -44,10 +41,12 @@ async fn main() -> Result<(), anyhow::Error> {
     let (mut network_client, mut network_events, network_event_loop) =
         network::new(arguments.username, arguments.rendezvous_address)?;
 
-    // Spawn the network task for it to run in the background.
+    // Spawn the network task for it to run in the background
     tokio::task::spawn(network_event_loop.run());
 
     let mut stdin = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+
+    // listen for user actions on stdin and events from the network
     loop {
         tokio::select! {
             command = stdin.next_line() => handle_std_in(command, &mut network_client).await,
