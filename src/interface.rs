@@ -213,6 +213,12 @@ pub async fn handle_network_event(event: Option<Event>, network_client: &mut Cli
             println!("{message}");
         }
         Event::RegistrationRequest { username } => {
+            let peer_id = network_client.get_peer_id(username.clone()).await;
+            if peer_id.is_some() {
+                eprintln!("The username '{username}' is already registered on the network, try using a different one");
+                std::process::exit(1);
+            }
+
             if let Err(error) = network_client.register_username(username.clone()).await {
                 println!("Failed to register username, will try again soon: {error:?}");
             } else {
