@@ -10,7 +10,6 @@ use super::{Event, EventLoop};
 use crate::network::{DirectMessage, NoResponse, TradeOffer, TradeResponse, TradeResponseResponse};
 
 impl EventLoop {
-    #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) fn handle_get_record(
         &mut self,
         record: kad::GetRecordResult,
@@ -59,6 +58,7 @@ impl EventLoop {
         query_id: QueryId,
     ) {
         if let Some(status_sender) = self.pending_register_username.remove(&query_id) {
+            self.has_registered_username = record.is_ok();
             let status = record.map(|_| ());
             status_sender
                 .send(status)
@@ -243,6 +243,35 @@ impl EventLoop {
         }
     }
 
+    pub(in crate::network::event_loop) fn handle_mdns_discovered(
+        &mut self,
+        list: Vec<(PeerId, Multiaddr)>,
+    ) {
+        for (peer_id, multiaddr) in list {
+            self.swarm
+                .behaviour_mut()
+                .gossipsub
+                .add_explicit_peer(&peer_id);
+
+            self.swarm
+                .behaviour_mut()
+                .kademlia
+                .add_address(&peer_id, multiaddr);
+        }
+    }
+
+    pub(in crate::network::event_loop) fn handle_mdns_expired(
+        &mut self,
+        list: &Vec<(PeerId, Multiaddr)>,
+    ) {
+        for (peer_id, _multiaddr) in list {
+            self.swarm
+                .behaviour_mut()
+                .gossipsub
+                .remove_explicit_peer(peer_id);
+        }
+    }
+
     #[allow(clippy::unused_self)]
     pub(in crate::network::event_loop) async fn handle_gossipsub_message(
         &mut self,
@@ -263,10 +292,18 @@ impl EventLoop {
     ) {
         self.cookie.replace(cookie);
 
+        if registrations.len() < 2 {
+            return;
+        }
+
         for registration in registrations {
+            let peer_id = registration.record.peer_id();
+            if peer_id == *self.swarm.local_peer_id() {
+                return;
+            }
+
             for address in registration.record.addresses() {
-                let peer_id = registration.record.peer_id();
-                tracing::info!(%peer_id, %address, "Discovered peer");
+                tracing::info!(%peer_id, %address, "Discovered peer from rendezvous point");
 
                 let p2p_suffix = multiaddr::Protocol::P2p(peer_id);
                 let address_with_p2p =
@@ -280,14 +317,14 @@ impl EventLoop {
 
                 self.swarm
                     .behaviour_mut()
-                    .gossipsub
-                    .add_explicit_peer(&peer_id);
-
-                self.swarm
-                    .behaviour_mut()
                     .kademlia
                     .add_address(&peer_id, address.to_owned());
             }
+
+            self.swarm
+                .behaviour_mut()
+                .gossipsub
+                .add_explicit_peer(&peer_id);
         }
     }
 
@@ -316,5 +353,17 @@ impl EventLoop {
             tracing::error!("Failed to register: {error}");
         }
         tracing::info!("Connection established with rendezvous point");
+    }
+
+    pub(in crate::network::event_loop) async fn handle_kademlia_routing_updated(&mut self) {
+        if !self.has_registered_username {
+            self.event_sender
+                .send(Event::RegistrationRequest {
+                    username: self.username.clone(),
+                })
+                .await
+                .expect("Event receiver was dropped");
+            self.has_registered_username = true;
+        }
     }
 }

@@ -9,7 +9,7 @@ use futures::{
     channel::{mpsc, oneshot},
     SinkExt,
 };
-use libp2p::{kad, PeerId};
+use libp2p::{gossipsub, kad, PeerId};
 
 use super::{event_loop::Command, username_store::UsernameStore};
 
@@ -199,11 +199,21 @@ impl Client {
         username
     }
 
-    pub(crate) async fn send_message(&mut self, message: String) {
+    pub(crate) async fn send_message(
+        &mut self,
+        message: String,
+    ) -> Result<(), gossipsub::PublishError> {
+        let (status_sender, status_receiver) = oneshot::channel();
+
         self.command_sender
-            .send(Command::SendMessage { message })
+            .send(Command::SendMessage {
+                message,
+                status_sender,
+            })
             .await
             .expect("Command receiver was dropped");
+
+        status_receiver.await.expect("Status sender was dropped")
     }
 
     pub(crate) async fn direct_message(

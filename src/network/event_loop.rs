@@ -13,7 +13,7 @@ use futures::{
     StreamExt,
 };
 use libp2p::{
-    gossipsub, identify, kad, rendezvous, request_response,
+    gossipsub, identify, kad, mdns, rendezvous, request_response,
     swarm::{Swarm, SwarmEvent},
     PeerId,
 };
@@ -44,6 +44,8 @@ pub(crate) struct EventLoop {
     outgoing_trade_offers: HashMap<(PeerId, TradeOffer), (Vec<u8>, PathBuf)>,
     inbound_trade_offers: HashSet<(PeerId, TradeOffer)>,
     gossipsub_topic: gossipsub::IdentTopic,
+    has_registered_username: bool,
+    username: String,
     discover_tick: tokio::time::Interval,
     cookie: Option<rendezvous::Cookie>,
     rendezvous_namespace: rendezvous::Namespace,
@@ -55,6 +57,7 @@ impl EventLoop {
         command_receiver: mpsc::Receiver<Command>,
         event_sender: mpsc::Sender<Event>,
         gossipsub_topic: gossipsub::IdentTopic,
+        username: String,
         rendezvous_peer_id: PeerId,
     ) -> Self {
         Self {
@@ -71,6 +74,8 @@ impl EventLoop {
             outgoing_trade_offers: HashMap::default(),
             inbound_trade_offers: HashSet::default(),
             gossipsub_topic,
+            has_registered_username: false,
+            username,
             discover_tick: tokio::time::interval(Duration::from_secs(30)),
             cookie: None,
             rendezvous_namespace: rendezvous::Namespace::from_static(RENDEZVOUS_NAMESPACE),
@@ -119,6 +124,10 @@ impl EventLoop {
                 },
             )) => self.handle_put_record(record, query_id),
 
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(kad::Event::RoutingUpdated {
+                ..
+            })) => self.handle_kademlia_routing_updated().await,
+
             SwarmEvent::Behaviour(BehaviourEvent::DirectMessaging(
                 request_response::Event::Message { peer, message, .. },
             )) => self.handle_direct_messaging_message(message, peer).await,
@@ -149,6 +158,14 @@ impl EventLoop {
                 },
             )) => self.handle_trade_response_outbound_failure(request_id, error),
 
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
+                self.handle_mdns_discovered(list);
+            }
+
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
+                self.handle_mdns_expired(&list);
+            }
+
             SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source: peer_id,
                 message,
@@ -174,35 +191,11 @@ impl EventLoop {
                 ..
             })) => self.handle_identify_received(info),
 
-            SwarmEvent::Behaviour(
-                BehaviourEvent::Kademlia(_)
-                | BehaviourEvent::Identify(
-                    identify::Event::Sent { .. } | identify::Event::Pushed { .. },
-                )
-                | BehaviourEvent::Gossipsub(
-                    gossipsub::Event::GossipsubNotSupported { .. }
-                    | gossipsub::Event::Subscribed { .. },
-                )
-                | BehaviourEvent::Rendezvous(rendezvous::client::Event::Registered { .. })
-                | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::TradeOffering(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::TradeResponse(request_response::Event::ResponseSent { .. }),
-            )
-            | SwarmEvent::Dialing { .. }
-            | SwarmEvent::IncomingConnection { .. }
-            | SwarmEvent::ConnectionClosed { .. }
-            | SwarmEvent::IncomingConnectionError { .. }
-            | SwarmEvent::ConnectionEstablished { .. }
-            | SwarmEvent::NewExternalAddrOfPeer { .. }
-            | SwarmEvent::OutgoingConnectionError { .. }
-            | SwarmEvent::NewListenAddr { .. } => {}
-
-            event => println!("{event:?}"),
+            _event => {}
         }
     }
 }
 
-#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub(crate) enum Event {
     InboundTradeOffer {
@@ -223,5 +216,8 @@ pub(crate) enum Event {
     InboundChat {
         peer_id: PeerId,
         message: String,
+    },
+    RegistrationRequest {
+        username: String,
     },
 }
