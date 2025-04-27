@@ -17,11 +17,20 @@ cargo build
 
 ## Booting the rendezvous server
 
-To use `decent-share`, it is critical that the rendezvous server is running.
-When a node is booted up, it connects to the rendezvous server in order to
-discover other peers and be discoverable to other peers. Run the rendezvous
-server by executing its binary. Optionally set the value of the `RUST_LOG`
-environment variable to enable logging to stdout.
+`decent-share` can be used across networks through the use of a rendezvous
+server, or over a local access network using mDNS. If inter-network
+communication is not required, there is no need for the rendezvous server to be
+running, peers will automatically find each other when running on the same
+network. If two peers are not connected to the same network, it is critical that
+the rendezvous server is running.
+
+When an IP address is specified for a rendezvous server, new nodes will
+immediately connect to the rendezvous server in order to discover other peers
+and be discoverable to other peers.
+
+To run the rendezvous server, execute its binary on the command line. Optionally
+set the value of the `RUST_LOG` environment variable to enable logging to
+stdout.
 
 ```bash
 ./rendezvous_server
@@ -30,47 +39,36 @@ RUST_LOG=info ./rendezvous_server
 
 ## Starting a new peer
 
-Once the rendezvous server is running, you may start up a client node. To do so,
-execute the binary file on the command line. `decent-share` takes a single
-command line argument, `--rendezvous-address`/`-r`, to specify the IPv4 address
-that the rendezvous server is hosted on. This must be input in dotted decimal
-notation. If you are running a node on the same machine as the rendezvous
-server, you may omit this argument as it defaults to `127.0.0.1`.
+To boot a new node, execute the binary file on the command line. `decent-share`
+takes up to two arguments. `--username`/`-u` must be specified, this is the name
+other users will see when you send messages and trade offers. The second
+argument, `--rendezvous-address`/`-r`, is optional. If specified, it must be
+an IPv4 address (in dotted decimal notation), which a rendezvous server is
+listening on. The rendezvous server's port number is fixed, so this should not
+be added. As described above if you do not wish to communicate with peers
+outside your local network, this argument can be left unspecified.
 
 ```bash
-./decent-share --rendezvous-address 198.162.0.1
+./decent-share --username name --rendezvous-address 198.162.0.1
 ```
-
-`decent-share` will connect to peers who have also registered on the rendezvous
-server. The first node to be booted will emit a warning that there are no known
-peers. Without any other peers connected, none of `decent-share`'s features will
-function.
 
 ## Usage
 
-Once another peer has connected, `decent-share` will listen to `stdin` for
-actions to perform. There are six different actions one can perform.
+Once your node has made a connection to another node, `decent-share` will emit
+a message that your username has successfully been registered on the network.
+This will be almost instant when connection through mDNS but may take a few
+seconds when connecting to a rendezvous server. It will then listen to `stdin`
+for actions to perform. There are six different actions one can perform.
 
-* register
 * send
 * dm
 * trade
 * accept
 * decline
 
-The first action one must perform is `register`. This gives you a username so
-that other peers can trade with and direct message you. To register a name,
-type the following, replacing `<username>` with the name you would like to
-register as.
-
-```sh
-register <username>
-```
-
-Once you are registered, you can introduce yourself to other users with `send`.
-Chat messages sent using the `send` action are broadcast to all active users of
-`decent-share`. Here you can tell peers what files you have to offer and ask
-others what they have available.
+To send a chat message, you can use `send`. Chat messages sent using the `send`
+action are broadcast to all active users of `decent-share`. Here you can tell
+peers what files you have to offer and ask others what they have available.
 
 ```sh
 send <message>
