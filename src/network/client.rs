@@ -98,6 +98,7 @@ impl Client {
         };
 
         let (offered_bytes_sender, offered_bytes_receiver) = oneshot::channel();
+
         self.command_sender
             .send(Command::RespondTrade {
                 peer_id,
@@ -128,6 +129,7 @@ impl Client {
         let Some(peer_id) = self.get_peer_id(username.clone()).await else {
             bail!("'{username}' is not a registered user");
         };
+
         self.command_sender
             .send(Command::RespondTrade {
                 peer_id,
@@ -138,6 +140,7 @@ impl Client {
             })
             .await
             .expect("Command receiver was dropped");
+
         Ok(())
     }
 
@@ -228,11 +231,11 @@ impl Client {
         username: String,
         message: String,
     ) -> Result<(), anyhow::Error> {
-        let (error_sender, error_receiver) = oneshot::channel();
-
         let Some(peer_id) = self.get_peer_id(username.clone()).await else {
             bail!("'{username}' is not a registered user");
         };
+
+        let (error_sender, error_receiver) = oneshot::channel();
 
         self.command_sender
             .send(Command::DirectMessage {
@@ -243,6 +246,6 @@ impl Client {
             .await
             .expect("Command receiver was dropped");
 
-        error_receiver.await.expect("Error receiver was dropped")
+        error_receiver.await.expect("Error sender was dropped")
     }
 }
