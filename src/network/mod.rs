@@ -6,7 +6,7 @@ use std::{hash::Hash, sync::Arc, time::Duration};
 
 use futures::{channel::mpsc, Stream};
 use libp2p::{
-    gossipsub, identify, identity, kad, noise, rendezvous,
+    gossipsub, identify, identity, kad, mdns, noise, rendezvous,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
     tcp, yamux, Multiaddr, PeerId, StreamProtocol,
@@ -29,6 +29,7 @@ struct Behaviour {
     gossipsub: gossipsub::Behaviour,
     rendezvous: rendezvous::client::Behaviour,
     identify: identify::Behaviour,
+    mdns: mdns::tokio::Behaviour,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Hash)]
@@ -123,6 +124,10 @@ pub(crate) fn new(
                     "rendezvous-identify/1.0.0".to_string(),
                     keypair.public(),
                 )),
+                mdns: mdns::tokio::Behaviour::new(
+                    mdns::Config::default(),
+                    keypair.public().to_peer_id(),
+                )?,
             })
         })?
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))

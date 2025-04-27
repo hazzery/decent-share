@@ -10,10 +10,10 @@ use std::{
 
 use futures::{
     channel::{mpsc, oneshot},
-    SinkExt, StreamExt,
+    StreamExt,
 };
 use libp2p::{
-    gossipsub, identify, kad, rendezvous, request_response,
+    gossipsub, identify, kad, mdns, rendezvous, request_response,
     swarm::{Swarm, SwarmEvent},
     PeerId,
 };
@@ -158,6 +158,14 @@ impl EventLoop {
                 },
             )) => self.handle_trade_response_outbound_failure(request_id, error),
 
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
+                self.handle_mdns_discovered(list);
+            }
+
+            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
+                self.handle_mdns_expired(&list);
+            }
+
             SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(gossipsub::Event::Message {
                 propagation_source: peer_id,
                 message,
@@ -183,30 +191,7 @@ impl EventLoop {
                 ..
             })) => self.handle_identify_received(info),
 
-            SwarmEvent::Behaviour(
-                BehaviourEvent::Kademlia(_)
-                | BehaviourEvent::Identify(
-                    identify::Event::Sent { .. } | identify::Event::Pushed { .. },
-                )
-                | BehaviourEvent::Gossipsub(
-                    gossipsub::Event::GossipsubNotSupported { .. }
-                    | gossipsub::Event::Subscribed { .. },
-                )
-                | BehaviourEvent::Rendezvous(rendezvous::client::Event::Registered { .. })
-                | BehaviourEvent::DirectMessaging(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::TradeOffering(request_response::Event::ResponseSent { .. })
-                | BehaviourEvent::TradeResponse(request_response::Event::ResponseSent { .. }),
-            )
-            | SwarmEvent::Dialing { .. }
-            | SwarmEvent::NewListenAddr { .. }
-            | SwarmEvent::IncomingConnection { .. }
-            | SwarmEvent::ConnectionClosed { .. }
-            | SwarmEvent::IncomingConnectionError { .. }
-            | SwarmEvent::ConnectionEstablished { .. }
-            | SwarmEvent::NewExternalAddrOfPeer { .. }
-            | SwarmEvent::OutgoingConnectionError { .. } => {}
-
-            event => println!("{event:?}"),
+            _event => {}
         }
     }
 }
