@@ -333,7 +333,7 @@ impl EventLoop {
             Some(self.rendezvous_namespace.clone()),
             None,
             None,
-            self.rendezvous_peer_id,
+            self.rendezvous_peer_id.unwrap(),
         );
     }
 
@@ -341,18 +341,24 @@ impl EventLoop {
         &mut self,
         info: identify::Info,
     ) {
+        self.swarm.add_external_address(info.observed_addr);
+
+        let Some(rendezvous_peer_id) = self.rendezvous_peer_id else {
+            return;
+        };
+
         // once `/identify` did its job, we know our external address and can
         // register. This needs to be done explicitly for this case, as it's a
         // local address.
-        self.swarm.add_external_address(info.observed_addr);
         if let Err(error) = self.swarm.behaviour_mut().rendezvous.register(
             self.rendezvous_namespace.clone(),
-            self.rendezvous_peer_id,
+            rendezvous_peer_id,
             None,
         ) {
             tracing::error!("Failed to register: {error}");
+        } else {
+            tracing::info!("Connection established with rendezvous point");
         }
-        tracing::info!("Connection established with rendezvous point");
     }
 
     pub(in crate::network::event_loop) async fn handle_kademlia_routing_updated(&mut self) {

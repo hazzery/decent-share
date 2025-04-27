@@ -28,7 +28,7 @@ const RENDEZVOUS_NAMESPACE: &str = "rendezvous";
 
 pub(crate) struct EventLoop {
     swarm: Swarm<Behaviour>,
-    rendezvous_peer_id: PeerId,
+    rendezvous_peer_id: Option<PeerId>,
     command_receiver: mpsc::Receiver<Command>,
     event_sender: mpsc::Sender<Event>,
     pending_register_username:
@@ -58,7 +58,7 @@ impl EventLoop {
         event_sender: mpsc::Sender<Event>,
         gossipsub_topic: gossipsub::IdentTopic,
         username: String,
-        rendezvous_peer_id: PeerId,
+        rendezvous_peer_id: Option<PeerId>,
     ) -> Self {
         Self {
             swarm,
@@ -91,7 +91,7 @@ impl EventLoop {
                     // Command channel closed, thus shutting down the network event loop.
                     None => return,
                 },
-                _ = self.discover_tick.tick(), if self.cookie.is_some() => {
+                _ = self.discover_tick.tick(), if self.rendezvous_peer_id.is_some() && self.cookie.is_some() => {
                     self.swarm
                         .behaviour_mut()
                         .rendezvous
@@ -99,7 +99,7 @@ impl EventLoop {
                             Some(self.rendezvous_namespace.clone()),
                             self.cookie.clone(),
                             None,
-                            self.rendezvous_peer_id
+                            self.rendezvous_peer_id.unwrap(),
                         );
                 }
             }
@@ -173,7 +173,7 @@ impl EventLoop {
             })) => self.handle_gossipsub_message(&message, peer_id).await,
 
             SwarmEvent::ConnectionEstablished { peer_id, .. }
-                if peer_id == self.rendezvous_peer_id =>
+                if  Some(peer_id) == self.rendezvous_peer_id =>
             {
                 self.handle_connected_to_rendezvous_server();
             }

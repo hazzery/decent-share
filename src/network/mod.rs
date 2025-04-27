@@ -9,7 +9,7 @@ use libp2p::{
     gossipsub, identify, identity, kad, mdns, noise, rendezvous,
     request_response::{self, ProtocolSupport},
     swarm::NetworkBehaviour,
-    tcp, yamux, Multiaddr, PeerId, StreamProtocol,
+    tcp, yamux, Multiaddr, StreamProtocol,
 };
 use serde::{Deserialize, Serialize};
 use tokio::io::{Error as TokioError, ErrorKind as TokioErrorKind};
@@ -67,7 +67,7 @@ pub(crate) struct NoResponse();
 /// - The network task driving the network itself.
 pub(crate) fn new(
     username: String,
-    rendezvous_ip_address: &str,
+    rendezvous_ip_address: Option<String>,
 ) -> Result<(Client, impl Stream<Item = Event>, EventLoop), anyhow::Error> {
     // Set a custom gossipsub configuration
     let gossipsub_config = gossipsub::ConfigBuilder::default()
@@ -142,11 +142,15 @@ pub(crate) fn new(
     swarm.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
 
-    let rendezvous_peer_id: PeerId = RENDEZVOUS_POINT_PEER_ID.parse()?;
+    let mut rendezvous_peer_id = None;
+    if let Some(rendezvous_ip_address) = rendezvous_ip_address {
+        rendezvous_peer_id = Some(RENDEZVOUS_POINT_PEER_ID.parse()?);
 
-    let rendezvous_multi_address: Multiaddr =
-        format!("/ip4/{rendezvous_ip_address}/tcp/{RENDEZVOUS_POINT_PORT_NUMBER}").parse()?;
-    swarm.dial(rendezvous_multi_address)?;
+        let rendezvous_multi_address: Multiaddr =
+            format!("/ip4/{rendezvous_ip_address}/tcp/{RENDEZVOUS_POINT_PORT_NUMBER}").parse()?;
+
+        swarm.dial(rendezvous_multi_address)?;
+    }
 
     Ok((
         Client {

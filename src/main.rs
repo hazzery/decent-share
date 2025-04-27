@@ -42,7 +42,7 @@ async fn main() -> Result<(), anyhow::Error> {
     let arguments = Arguments::parse();
 
     let (mut network_client, mut network_events, network_event_loop) =
-        network::new(arguments.username, &arguments.rendezvous_address)?;
+        network::new(arguments.username, arguments.rendezvous_address)?;
 
     // Spawn the network task for it to run in the background.
     tokio::task::spawn(network_event_loop.run());
@@ -64,6 +64,6 @@ struct Arguments {
     username: String,
 
     /// The IP address of the rendezvous server.
-    #[arg(long, short, default_value = "127.0.0.1")]
-    rendezvous_address: String,
+    #[arg(long, short)]
+    rendezvous_address: Option<String>,
 }
