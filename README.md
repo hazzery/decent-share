@@ -1,4 +1,4 @@
-# COSC473 Assignment Two SwapBytes: `decent-share`
+# `decent-share`
 
 `decent-share` is a decentralised file swapping application. `decent-share`
 provides a global chat for all connected peers, direct messaging to a single
